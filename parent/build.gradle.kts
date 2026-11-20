@@ -8,7 +8,7 @@ val firebaseApiKey = providers.gradleProperty("FIREBASE_API_KEY").orElse(provide
 val firebaseDatabaseUrl = providers.gradleProperty("FIREBASE_DATABASE_URL").orElse(providers.environmentVariable("FIREBASE_DATABASE_URL")).getOrElse("")
 fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 val signingValues = listOf("ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")
-val hasSigning = file("$rootDir/guardian-release.jks").exists() &&
+val hasSigning = rootProject.file("guardian-release.jks").exists() &&
     signingValues.all { !System.getenv(it).isNullOrBlank() }
 
 android {
@@ -32,7 +32,7 @@ android {
     if (hasSigning) {
         signingConfigs {
             create("release") {
-                storeFile = file("$rootDir/guardian-release.jks")
+                storeFile = rootProject.file("guardian-release.jks")
                 storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("ANDROID_KEY_ALIAS")
                 keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
