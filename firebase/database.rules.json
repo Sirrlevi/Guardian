@@ -1,0 +1,30 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "pairingCodes": {
+      "$code": {
+        ".read": "auth != null && data.child('expiresAt').val() > now",
+        ".write": "auth != null && newData.child('familyId').val() == auth.uid"
+      }
+    },
+    "families": {
+      "$familyId": {
+        ".read": "auth != null && (auth.uid == $familyId || data.child('members').child(auth.uid).exists())",
+        ".write": "auth != null && auth.uid == $familyId",
+        "members": {
+          "$memberId": {
+            ".read": "auth != null && (auth.uid == $familyId || auth.uid == $memberId)",
+            ".write": "auth != null && auth.uid == $memberId"
+          }
+        },
+        "devices": {
+          "$deviceId": {
+            ".read": "auth != null && (auth.uid == $familyId || auth.uid == $deviceId)",
+            ".write": "auth != null && (auth.uid == $familyId || auth.uid == $deviceId)"
+          }
+        }
+      }
+    }
+  }
+}

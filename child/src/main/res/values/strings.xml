@@ -1,0 +1,3 @@
+<resources>
+    <string name="device_admin_description">Enables parent-approved application suspension and usage limits on a fully managed device.</string>
+</resources>

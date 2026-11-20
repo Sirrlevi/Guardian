@@ -1,0 +1,117 @@
+name: Android Build and Release
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: guardian-android-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Run tests and build debug APKs
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
+        run: |
+          gradle --no-daemon clean \
+            :core:test \
+            :parent:testDebugUnitTest \
+            :child:testDebugUnitTest \
+            :parent:assembleDebug \
+            :child:assembleDebug
+
+      - name: Configure persistent release signing
+        id: signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] &&
+             [ -n "$ANDROID_KEYSTORE_PASSWORD" ] &&
+             [ -n "$ANDROID_KEY_ALIAS" ] &&
+             [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > guardian-release.jks
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Persistent signing secrets are not configured; only debug APKs will be published."
+          fi
+
+      - name: Build signed release APKs
+        if: steps.signing.outputs.ready == 'true'
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          gradle --no-daemon :parent:assembleRelease :child:assembleRelease
+
+      - name: Prepare release assets
+        id: assets
+        run: |
+          mkdir -p release-assets
+          if [ -f parent/build/outputs/apk/release/parent-release.apk ] &&
+             [ -f child/build/outputs/apk/release/child-release.apk ]; then
+            cp parent/build/outputs/apk/release/parent-release.apk release-assets/Guardian-Parent.apk
+            cp child/build/outputs/apk/release/child-release.apk release-assets/Guardian-Child.apk
+            echo "mode=Signed release" >> "$GITHUB_OUTPUT"
+          else
+            cp parent/build/outputs/apk/debug/parent-debug.apk release-assets/Guardian-Parent-debug.apk
+            cp child/build/outputs/apk/debug/child-debug.apk release-assets/Guardian-Child-debug.apk
+            echo "mode=Debug-signed test build (not stable for in-place updates)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Guardian-Android-APKs-${{ github.run_number }}
+          path: |
+            parent/build/outputs/apk/debug/*.apk
+            child/build/outputs/apk/debug/*.apk
+            parent/build/outputs/apk/release/*.apk
+            child/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Publish latest APK release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: guardian-v1.0.${{ github.run_number }}
+          name: Guardian v1.0.${{ github.run_number }}
+          body: |
+            Automated Android build from commit ${{ github.sha }}.
+
+            Build type: ${{ steps.assets.outputs.mode }}
+
+            Both Parent and Child APKs are attached. Configure a persistent Android signing keystore in repository Actions secrets before distributing production updates.
+          files: release-assets/*.apk
+          make_latest: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,10 @@
+*.iml
+.gradle/
+.idea/
+local.properties
+**/build/
+.DS_Store
+guardian-release.jks
+*.jks
+*.keystore
+google-services.json
