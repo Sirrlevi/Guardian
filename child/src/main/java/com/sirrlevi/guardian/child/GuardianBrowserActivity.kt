@@ -43,7 +43,7 @@ class GuardianBrowserActivity : AppCompatActivity() {
         val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         address = EditText(this).apply {
             hint = "Search or enter website"
-            singleLine = true
+            setSingleLine(true)
             imeOptions = EditorInfo.IME_ACTION_GO
             setTextColor(Color.WHITE)
             setHintTextColor(Color.GRAY)
