@@ -59,6 +59,41 @@ For stable release signing, configure these repository Actions secrets:
 
 The keystore is decoded only on the runner and is ignored by Git. Without these secrets the workflow publishes debug APKs for testing; debug signing is not a durable update identity across hosted runners.
 
+## In-app updates (Parent + Child)
+
+Both apps include **Settings → App Updates**:
+
+- Save one GitHub fine-grained personal access token on each phone.
+- Check manually, on app launch, and periodically in the background (WorkManager, about every 6 hours when Android permits).
+- A notification is posted once per newly detected signed release. Open the app to download and install.
+- The updater downloads only the APK matching the installed app (Parent or Child) from the latest GitHub Release and checks the asset size/archive before handing it to Android's package installer.
+- Android asks the user to allow installs from Guardian and confirm the update. Silent installation is not available to an ordinary app.
+- App data stays in place for an in-place update when application ID and signing certificate match. Do not uninstall or clear app storage.
+
+### GitHub updater token
+
+Create a fine-grained personal access token for resource owner `Sirrlevi`, restrict it to **only** the `Guardian` repository, and grant **Contents: Read-only** repository permission. Paste the token into Settings → App Updates on both phones. It is encrypted locally using Android Keystore. Do not commit it, put it in source code, or add it as an APK build constant. Use an expiry date and rotate/revoke it if a phone is lost.
+
+### Mandatory persistent Android signing
+
+An APK update can replace an installed app only when it has the same signing key. Before installing the first Guardian release, create one long-lived keystore and keep a secure backup:
+
+```bash
+keytool -genkeypair -v -keystore guardian-release.jks -alias guardian-release -keyalg RSA -keysize 2048 -validity 10000
+base64 -w 0 guardian-release.jks > guardian-release.base64
+```
+
+Add these repository Actions secrets (Settings → Secrets and variables → Actions):
+
+- `ANDROID_KEYSTORE_BASE64`: the full single-line contents of `guardian-release.base64`
+- `ANDROID_KEYSTORE_PASSWORD`: keystore password
+- `ANDROID_KEY_ALIAS`: `guardian-release`
+- `ANDROID_KEY_PASSWORD`: key password
+
+Never regenerate or lose this keystore after distributing the signed APKs. If it changes, Android will reject future in-place updates. The workflow may still build debug APK artifacts without the signing secrets, but it will **not publish debug APKs as updates**. A new latest Release is published only after CI passes and both APKs are signed with the persistent key.
+
+If an older debug-signed Guardian APK was already installed, it cannot be updated to this signing key in place. Uninstall it and install the first signed release before creating accounts or pairing devices.
+
 ## Important platform boundaries
 
 - Guardian Browser is the only place where full HTTPS URL paths and page duration can be recorded reliably.
