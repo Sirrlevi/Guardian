@@ -72,7 +72,7 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Persistent signing secrets are not configured; only debug APKs will be published."
+            echo "::warning::Persistent signing secrets are missing. Debug APKs will be built for CI only; no update release will be published."
           fi
 
       - name: Build signed release APKs
@@ -86,20 +86,17 @@ jobs:
         run: |
           gradle --no-daemon :parent:assembleRelease :child:assembleRelease
 
-      - name: Prepare release assets
+      - name: Prepare signed release assets
         id: assets
+        if: steps.signing.outputs.ready == 'true'
         run: |
+          set -euo pipefail
           mkdir -p release-assets
-          if [ -f parent/build/outputs/apk/release/parent-release.apk ] &&
-             [ -f child/build/outputs/apk/release/child-release.apk ]; then
-            cp parent/build/outputs/apk/release/parent-release.apk release-assets/Guardian-Parent.apk
-            cp child/build/outputs/apk/release/child-release.apk release-assets/Guardian-Child.apk
-            echo "mode=Signed release" >> "$GITHUB_OUTPUT"
-          else
-            cp parent/build/outputs/apk/debug/parent-debug.apk release-assets/Guardian-Parent-debug.apk
-            cp child/build/outputs/apk/debug/child-debug.apk release-assets/Guardian-Child-debug.apk
-            echo "mode=Debug-signed test build (not stable for in-place updates)" >> "$GITHUB_OUTPUT"
-          fi
+          test -f parent/build/outputs/apk/release/parent-release.apk
+          test -f child/build/outputs/apk/release/child-release.apk
+          cp parent/build/outputs/apk/release/parent-release.apk release-assets/Guardian-Parent.apk
+          cp child/build/outputs/apk/release/child-release.apk release-assets/Guardian-Child.apk
+          echo "mode=Persistent-key signed release" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifacts
         continue-on-error: true
@@ -114,7 +111,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Publish latest APK release
+      - name: Publish latest signed APK release
+        if: steps.signing.outputs.ready == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: guardian-v1.0.${{ github.run_number }}
@@ -124,7 +122,7 @@ jobs:
 
             Build type: ${{ steps.assets.outputs.mode }}
 
-            Both Parent and Child APKs are attached. Configure a persistent Android signing keystore in repository Actions secrets before distributing production updates.
+            Both Parent and Child APKs are signed with the repository's persistent Android upload key. These packages are eligible for in-place Android updates.
           files: release-assets/*.apk
           make_latest: true
           generate_release_notes: true
