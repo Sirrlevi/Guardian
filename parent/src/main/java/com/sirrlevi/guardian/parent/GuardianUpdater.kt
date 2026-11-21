@@ -122,7 +122,10 @@ class GuardianUpdater(context: Context) {
             )
         }
 
-        val launch = Intent(app, ParentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val launch = Intent(app, ParentActivity::class.java).apply {
+            action = "com.sirrlevi.guardian.parent.OPEN_APP_UPDATES"
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
         val pending = PendingIntent.getActivity(
             app, 7301, launch,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE

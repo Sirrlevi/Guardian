@@ -8,6 +8,10 @@ Guardian is an Android parental-control project with two separate applications:
 
 ## Current implementation
 
+- Parent UI: Overview, Apps, Web, Controls, Reports and Settings tabs, with app cards, usage bars, recent activity and app-policy controls.
+- Child UI: Protection, Browser and Settings tabs with transparent permission status and in-app updates.
+- Recent foreground events are collected from Android Usage Access and displayed in the parent activity feed; this is sampled usage data, not a live screen stream.
+
 - Parent and child use separate Firebase accounts; an expiring 8-digit invite pairs the child account with the family.
 - Child session tokens are encrypted with an Android Keystore AES/GCM key.
 - Usage Access reporting sends app name, package, foreground duration and last-used timestamp.
@@ -64,8 +68,8 @@ The keystore is decoded only on the runner and is ignored by Git. Without these 
 Both apps include **Settings → App Updates**:
 
 - Save one GitHub fine-grained personal access token on each phone.
-- Check manually, on app launch, and periodically in the background (WorkManager, about every 6 hours when Android permits).
-- A notification is posted once per newly detected signed release. Open the app to download and install.
+- Check manually, on app launch, and periodically in the background (WorkManager, about every 15 minutes when Android permits (the OS may delay runs)).
+- A notification is posted once per newly detected signed release. Tapping it opens the App Updates tab directly; download and install are available there.
 - The updater downloads only the APK matching the installed app (Parent or Child) from the latest GitHub Release and checks the asset size/archive before handing it to Android's package installer.
 - Android asks the user to allow installs from Guardian and confirm the update. Silent installation is not available to an ordinary app.
 - App data stays in place for an in-place update when application ID and signing certificate match. Do not uninstall or clear app storage.

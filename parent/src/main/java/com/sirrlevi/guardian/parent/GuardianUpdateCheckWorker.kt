@@ -12,18 +12,17 @@ import java.util.concurrent.TimeUnit
 
 class GuardianUpdateCheckWorker(context: Context, parameters: WorkerParameters) : Worker(context, parameters) {
     override fun doWork(): Result {
-        return try {
+        val outcome: Result = try {
             val updater = GuardianUpdater(applicationContext)
-            if (!updater.hasToken()) {
-                Result.success()
-            } else {
-                val result = updater.checkForUpdate()
-                updater.notifyIfAvailable(result)
-                Result.success()
+            if (updater.hasToken()) {
+                val update = updater.checkForUpdate()
+                updater.notifyIfAvailable(update)
             }
+            Result.success()
         } catch (_: Exception) {
             if (runAttemptCount < 3) Result.retry() else Result.failure()
         }
+        return outcome
     }
 }
 
@@ -32,12 +31,12 @@ object GuardianUpdateScheduler {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
-        val request = PeriodicWorkRequestBuilder<GuardianUpdateCheckWorker>(6, TimeUnit.HOURS)
+        val request = PeriodicWorkRequestBuilder<GuardianUpdateCheckWorker>(15, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             "guardian-app-update-check",
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.UPDATE,
             request
         )
     }

@@ -42,6 +42,7 @@ class ChildSyncWorker(context: Context, parameters: WorkerParameters) : Coroutin
             val today = UsageMonitor.collect(applicationContext, UsageMonitor.dayStartMillis())
             val week = UsageMonitor.collect(applicationContext, now - 7L * 24 * 60 * 60 * 1000)
             val month = UsageMonitor.collect(applicationContext, now - 30L * 24 * 60 * 60 * 1000)
+            val recentActivities = UsageMonitor.recentForegroundEvents(applicationContext, 40)
             val installedApps = InstalledAppsCollector.collect(applicationContext)
             applyAppPolicy(policy, blockedPackages, today)
 
@@ -66,6 +67,7 @@ class ChildSyncWorker(context: Context, parameters: WorkerParameters) : Coroutin
             api.put(devicePath + "/usage/today", today, session)
             api.put(devicePath + "/usage/week", week, session)
             api.put(devicePath + "/usage/month", month, session)
+            api.put(devicePath + "/recentActivities", recentActivities, session)
             api.put(devicePath + "/apps/installed", installedApps, session)
             prefs.edit().putLong("last_sync", now).apply()
             Result.success()
