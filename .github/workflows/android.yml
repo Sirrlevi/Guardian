@@ -120,7 +120,7 @@ jobs:
             parent/build/outputs/apk/release/*.apk
             child/build/outputs/apk/release/*.apk
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 3
 
       - name: Publish latest signed APK release
         if: steps.signing.outputs.ready == 'true'

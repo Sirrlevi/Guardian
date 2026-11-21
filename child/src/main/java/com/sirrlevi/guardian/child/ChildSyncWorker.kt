@@ -1,7 +1,6 @@
 package com.sirrlevi.guardian.child
 
 import android.app.admin.DevicePolicyManager
-import android.content.ComponentName
 import android.content.Context
 import android.util.Log
 import androidx.work.CoroutineWorker
@@ -9,7 +8,10 @@ import androidx.work.WorkerParameters
 import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import com.sirrlevi.guardian.core.DayClock
+import com.sirrlevi.guardian.core.Enforcement
 import com.sirrlevi.guardian.core.GuardianApi
+import com.sirrlevi.guardian.core.PolicyCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -32,10 +34,11 @@ class ChildSyncWorker(context: Context, parameters: WorkerParameters) : Coroutin
             val policy = api.get("families/" + familyId + "/policies", session)?.asJsonObject ?: JsonObject()
             val domains = policy.arrayStrings("blockedDomains")
             val urls = policy.arrayStrings("blockedUrls")
-            val blockedPackages = policy.arrayStrings("blockedPackages")
+            val parsedPolicy = PolicyCodec.parse(policy)
             prefs.edit()
                 .putString("blocked_domains", Gson().toJson(domains))
                 .putString("blocked_urls", Gson().toJson(urls))
+                .putString("policy_json", policy.toString())
                 .apply()
 
             val now = System.currentTimeMillis()
@@ -44,7 +47,9 @@ class ChildSyncWorker(context: Context, parameters: WorkerParameters) : Coroutin
             val month = UsageMonitor.collect(applicationContext, now - 30L * 24 * 60 * 60 * 1000)
             val recentActivities = UsageMonitor.recentForegroundEvents(applicationContext, 40)
             val installedApps = InstalledAppsCollector.collect(applicationContext)
-            applyAppPolicy(policy, blockedPackages, today)
+            applyAppPolicy(parsedPolicy, today)
+            try { AppCatalog.sync(applicationContext, ChildCloud(applicationContext)) } catch (e: Exception) { Log.w("GuardianSync", "catalog sync failed", e) }
+            GuardianMonitorService.startIfReady(applicationContext)
 
             val manager = applicationContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
             val lastForeground = UsageMonitor.lastForegroundEvent(applicationContext)
@@ -61,6 +66,7 @@ class ChildSyncWorker(context: Context, parameters: WorkerParameters) : Coroutin
                     addProperty("lastForegroundAt", lastForeground.second)
                 }
                 addProperty("androidVersion", android.os.Build.VERSION.RELEASE ?: "unknown")
+                addProperty("monitorRunning", GuardianMonitorService.running)
             }
             val devicePath = "families/" + familyId + "/devices/" + session.uid
             api.put(devicePath + "/status", status, session)
@@ -80,27 +86,18 @@ class ChildSyncWorker(context: Context, parameters: WorkerParameters) : Coroutin
     private fun totalForeground(report: JsonArray): Long =
         report.sumOf { it.asJsonObject.get("foregroundMs")?.asLong ?: 0L }
 
-    private fun applyAppPolicy(policy: JsonObject, blocked: List<String>, usage: JsonArray) {
-        val manager = applicationContext.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        if (!manager.isDeviceOwnerApp(applicationContext.packageName)) return
-        val desired = blocked.toMutableSet()
-        val limits = policy.getAsJsonObject("appTimeLimitsMinutes")
-        if (limits != null) {
-            for ((packageName, limitElement) in limits.entrySet()) {
-                val minutes = try { limitElement.asInt } catch (_: Exception) { 0 }
-                if (minutes > 0 && UsageMonitor.foregroundMillis(packageName, usage) >= minutes * 60_000L) {
-                    desired.add(packageName)
-                }
-            }
+    /** Device Owner suspension, decided with the same engine the live monitor uses. */
+    private fun applyAppPolicy(policy: com.sirrlevi.guardian.core.FamilyPolicy, usage: JsonArray) {
+        if (!ChildPermissions.isDeviceOwner(applicationContext)) return
+        val now = System.currentTimeMillis()
+        val clock = DayClock.of(now)
+        val exempt = setOf(applicationContext.packageName)
+        val desired = HashSet<String>()
+        for (packageName in policy.appRules.keys) {
+            val used = (UsageMonitor.foregroundMillis(packageName, usage) / 1000L).toInt()
+            if (Enforcement.decide(packageName, policy, used, now, clock, exempt).blocked) desired.add(packageName)
         }
-        desired.remove(applicationContext.packageName)
-        val admin = ComponentName(applicationContext, GuardianAdminReceiver::class.java)
-        val previous = prefs.getStringSet("suspended_packages", emptySet()).orEmpty()
-        val toRelease = previous - desired
-        val toSuspend = desired - previous
-        if (toRelease.isNotEmpty()) manager.setPackagesSuspended(admin, toRelease.toTypedArray(), false)
-        if (toSuspend.isNotEmpty()) manager.setPackagesSuspended(admin, toSuspend.toTypedArray(), true)
-        prefs.edit().putStringSet("suspended_packages", desired).apply()
+        DeviceOwnerEnforcer.apply(applicationContext, desired)
     }
 
     private fun hasUsageAccess(): Boolean = try {

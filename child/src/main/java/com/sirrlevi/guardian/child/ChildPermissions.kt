@@ -1,0 +1,76 @@
+package com.sirrlevi.guardian.child
+
+import android.Manifest
+import android.app.AppOpsManager
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.net.VpnService
+import android.os.Build
+import android.os.PowerManager
+import android.os.Process
+import android.provider.Settings
+
+/** One place that knows which Android permissions Guardian Child needs and how to ask for each. */
+object ChildPermissions {
+    data class Item(val id: String, val title: String, val why: String, val granted: Boolean, val required: Boolean)
+
+    fun hasUsageAccess(context: Context): Boolean = try {
+        val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        @Suppress("DEPRECATION")
+        appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, Process.myUid(), context.packageName) == AppOpsManager.MODE_ALLOWED
+    } catch (_: Exception) { false }
+
+    fun hasOverlay(context: Context): Boolean = Settings.canDrawOverlays(context)
+
+    fun hasNotifications(context: Context): Boolean =
+        Build.VERSION.SDK_INT < 33 ||
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    fun ignoresBatteryOptimization(context: Context): Boolean = try {
+        (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(context.packageName)
+    } catch (_: Exception) { false }
+
+    fun isDeviceOwner(context: Context): Boolean = try {
+        (context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager).isDeviceOwnerApp(context.packageName)
+    } catch (_: Exception) { false }
+
+    fun isAdminActive(context: Context): Boolean = try {
+        (context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager)
+            .isAdminActive(ComponentName(context, GuardianAdminReceiver::class.java))
+    } catch (_: Exception) { false }
+
+    fun isVpnReady(context: Context): Boolean = try { VpnService.prepare(context) == null } catch (_: Exception) { false }
+
+    /** True when Guardian can actually stop a blocked app (either by overlay or as Device Owner). */
+    fun canEnforce(context: Context): Boolean = hasUsageAccess(context) && (hasOverlay(context) || isDeviceOwner(context))
+
+    fun items(context: Context): List<Item> = listOf(
+        Item("usage", "Usage access", "Lets Guardian see which app is open and for how long. Without it nothing can be reported or limited.",
+            hasUsageAccess(context), true),
+        Item("overlay", "Display over other apps", "Shows the \"time's up\" screen on top of a blocked app.",
+            hasOverlay(context), true),
+        Item("battery", "Run without battery limits", "Stops Android from putting Guardian to sleep, so limits keep working all day.",
+            ignoresBatteryOptimization(context), false),
+        Item("notifications", "Notifications", "Shows the always-on \"protection active\" notice and update alerts.",
+            hasNotifications(context), false),
+        Item("admin", "Uninstall protection", "Makes Android ask for confirmation before Guardian can be removed.",
+            isAdminActive(context), false),
+        Item("vpn", "Website filter (VPN)", "Blocks the websites your parent chose. Android shows a visible key icon while it is on.",
+            isVpnReady(context), false)
+    )
+
+    fun settingsIntent(context: Context, id: String): Intent? = when (id) {
+        "usage" -> Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+        "overlay" -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + context.packageName))
+        "battery" -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + context.packageName))
+        "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        "admin" -> Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
+            .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(context, GuardianAdminReceiver::class.java))
+            .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Guardian asks for confirmation before it can be removed from this device.")
+        else -> null
+    }
+}

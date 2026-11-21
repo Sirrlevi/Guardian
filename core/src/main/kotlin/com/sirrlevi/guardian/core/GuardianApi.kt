@@ -3,6 +3,7 @@ package com.sirrlevi.guardian.core
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -79,6 +80,67 @@ class GuardianApi(private val apiKey: String, databaseUrl: String) {
                 .put(value.toString().toRequestBody(jsonType))
                 .build()
         )
+    }
+
+    /** Multi-path update: keys may be "a/b/c" paths and a JSON null value deletes that path. */
+    fun patch(path: String, value: JsonObject, session: GuardianSession) {
+        execute(
+            Request.Builder()
+                .url("$databaseBase/${cleanPath(path)}.json?auth=${url(session.idToken)}")
+                .patch(value.toString().toRequestBody(jsonType))
+                .build()
+        )
+    }
+
+    fun delete(path: String, session: GuardianSession) {
+        execute(
+            Request.Builder().url("$databaseBase/${cleanPath(path)}.json?auth=${url(session.idToken)}").delete().build()
+        )
+    }
+
+    private val streamHttp: OkHttpClient by lazy {
+        http.newBuilder()
+            .readTimeout(75, TimeUnit.SECONDS) // the server sends a keep-alive every ~30 s
+            .callTimeout(0, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
+
+    /** A prepared Server-Sent-Events connection; call [cancel] from any thread to stop it. */
+    class StreamHandle internal constructor(private val callRef: Any) {
+        fun cancel() = (callRef as Call).cancel()
+        internal fun call(): Call = callRef as Call
+    }
+
+    /** Prepares a Server-Sent-Events connection. Nothing is sent until [consumeStream] runs. */
+    fun openStream(path: String, session: GuardianSession): StreamHandle =
+        StreamHandle(
+            streamHttp.newCall(
+                Request.Builder()
+                    .url("$databaseBase/${cleanPath(path)}.json?auth=${url(session.idToken)}")
+                    .header("Accept", "text/event-stream")
+                    .get()
+                    .build()
+            )
+        )
+
+    /**
+     * Blocks while the stream is open and calls [onEvent] with the event name ("put", "patch", …)
+     * whenever the data under the path changes. Returns when the server closes the stream
+     * (for example "auth_revoked" after the token expires) or when the call is cancelled;
+     * the caller reconnects with a fresh token.
+     */
+    fun consumeStream(handle: StreamHandle, onEvent: (String) -> Unit) {
+        val call = handle.call()
+        call.execute().use { response ->
+            if (!response.isSuccessful) throw IOException("Guardian stream error ${response.code}")
+            val source = response.body?.source() ?: return
+            val parser = SseParser { event, _ -> onEvent(event) }
+            while (!call.isCanceled()) {
+                val line = source.readUtf8Line() ?: break
+                parser.feed(line)
+            }
+        }
     }
 
     fun post(path: String, value: JsonElement, session: GuardianSession): String? {

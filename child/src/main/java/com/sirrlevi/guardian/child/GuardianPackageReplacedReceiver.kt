@@ -42,6 +42,7 @@ class GuardianPackageReplacedReceiver : BroadcastReceiver() {
                     OneTimeWorkRequestBuilder<ChildSyncWorker>().setConstraints(constraints).build()
                 )
             }
+            GuardianMonitorService.startIfReady(app)
             if (prefs.getBoolean("vpn_wanted", false) && VpnService.prepare(app) == null) {
                 ContextCompat.startForegroundService(app, Intent(app, DomainFilterVpnService::class.java))
             }

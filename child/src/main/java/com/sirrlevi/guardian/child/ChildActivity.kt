@@ -275,20 +275,18 @@ class ChildActivity : AppCompatActivity() {
         note(status, "Usage Access: " + (if (hasUsageAccess()) "Granted" else "Needs permission"))
         note(status, "VPN filtering: " + (if (isVpnPermissionReady()) "Permission granted previously" else "Needs permission or activation"))
 
-        val steps = sectionCard("Required permissions", "Guardian cannot enable protected Android permissions silently.")
-        permissionStep(steps, "01", "Usage Access",
-            if (hasUsageAccess()) "Granted · app usage reports can be collected" else "Needed for screen-time, app inventory and recent foreground events") {
-            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-        }
-        permissionStep(steps, "02", "Domain-filtering VPN",
-            "Android will show a system approval screen and a visible VPN indicator while filtering is active") {
-            requestVpn()
-        }
-        permissionStep(steps, "03", "Notifications",
-            if (Build.VERSION.SDK_INT < 33 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
-                "Notification permission is granted or not required on this Android version"
-            else "Allow notifications for sync and update status") {
-            requestUpdateNotificationPermission()
+        val enforcement = sectionCard("Live protection",
+            if (GuardianMonitorService.running) "Running now. Your parent's rules apply within about a second." else "Not running yet. Allow Usage Access below, then it starts by itself.")
+        statusPill(enforcement, if (GuardianMonitorService.running) "ACTIVE" else "OFF",
+            if (GuardianMonitorService.running) COLOR_MINT else COLOR_AMBER)
+        note(enforcement, if (ChildPermissions.canEnforce(this)) "Blocked apps and daily limits can be enforced on this phone."
+            else "Blocking needs both Usage Access and Display over other apps (or Device Owner setup).")
+
+        val steps = sectionCard("Permission centre", "Guardian cannot enable protected Android permissions silently. Each one opens the exact Android screen.")
+        ChildPermissions.items(this).forEachIndexed { index, item ->
+            val title = (if (item.required) "Required" else "Recommended") + " · " + item.title
+            val detail = (if (item.granted) "✓ On. " else "✗ Off. ") + item.why
+            permissionStep(steps, (index + 1).toString().padStart(2, '0'), title, detail) { grantPermission(item.id) }
         }
 
         val actions = sectionCard("Quick actions")
@@ -375,6 +373,22 @@ class ChildActivity : AppCompatActivity() {
                 }.show()
         }
         if (updater.hasToken()) checkForUpdates(false)
+    }
+
+    private fun grantPermission(id: String) {
+        if (id == "vpn") { requestVpn(); return }
+        if (id == "notifications" && Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7311)
+            return
+        }
+        val intent = ChildPermissions.settingsIntent(this, id) ?: return
+        try {
+            startActivity(intent)
+        } catch (_: Exception) {
+            try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) { }
+        }
     }
 
     private fun permissionStep(parent: LinearLayout, number: String, title: String, detail: String, action: () -> Unit) {
@@ -508,6 +522,10 @@ class ChildActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (session != null && familyId.isNotBlank()) {
+            GuardianMonitorService.startIfReady(this)
+            if (::page.isInitialized && activeTab == "Protection") renderTab()
+        }
         val file = pendingInstallFile
         if (file != null && (Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls())) {
             pendingInstallFile = null
@@ -707,5 +725,6 @@ class ChildActivity : AppCompatActivity() {
         private const val COLOR_ACCENT = 0xFF62D7C5.toInt()
         private const val COLOR_ACCENT_DARK = 0xFF174C55.toInt()
         private const val COLOR_MINT = 0xFF67DDB4.toInt()
+        private const val COLOR_AMBER = 0xFFFFC16B.toInt()
     }
 }
