@@ -11,14 +11,19 @@ import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
 
 class GuardianUpdateCheckWorker(context: Context, parameters: WorkerParameters) : Worker(context, parameters) {
-    override fun doWork(): Result = try {
-        val updater = GuardianUpdater(applicationContext)
-        if (!updater.hasToken()) return Result.success()
-        val result = updater.checkForUpdate()
-        updater.notifyIfAvailable(result)
-        Result.success()
-    } catch (_: Exception) {
-        if (runAttemptCount < 3) Result.retry() else Result.failure()
+    override fun doWork(): Result {
+        return try {
+            val updater = GuardianUpdater(applicationContext)
+            if (!updater.hasToken()) {
+                Result.success()
+            } else {
+                val result = updater.checkForUpdate()
+                updater.notifyIfAvailable(result)
+                Result.success()
+            }
+        } catch (_: Exception) {
+            if (runAttemptCount < 3) Result.retry() else Result.failure()
+        }
     }
 }
 
