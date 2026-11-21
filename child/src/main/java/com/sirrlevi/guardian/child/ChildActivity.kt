@@ -300,7 +300,7 @@ class ChildActivity : AppCompatActivity() {
         actionButton(actions, "Device Owner setup information", true) { showDeviceOwnerInfo() }
 
         val inventory = sectionCard("Local app inventory")
-        val appsCount = try { InstalledAppsCollector.collect(this).size } catch (_: Exception) { 0 }
+        val appsCount = try { InstalledAppsCollector.collect(this).size() } catch (_: Exception) { 0 }
         label(inventory, appsCount.toString() + " installed apps detected", 21, COLOR_TEXT, true)
         note(inventory, "The parent receives the inventory on the next successful sync. Remote app suspension and time-limit enforcement require Device Owner provisioning.")
         note(sectionCard("Sync status"), statusMessage)
@@ -366,7 +366,7 @@ class ChildActivity : AppCompatActivity() {
 
     private fun permissionStep(parent: LinearLayout, number: String, title: String, detail: String, action: () -> Unit) {
         val card = sectionCard(parent, number + "  " + title, detail)
-        actionButton(card, "Open Android settings / approve", action)
+        actionButton(card, "Open Android settings / approve", false, action)
     }
 
     private fun saveUpdateToken() {
