@@ -1,8 +1,11 @@
 package com.sirrlevi.guardian.child
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
@@ -15,6 +18,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -25,6 +29,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.gson.JsonObject
 import com.sirrlevi.guardian.core.GuardianApi
 import com.sirrlevi.guardian.core.GuardianSession
+import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
@@ -38,6 +43,12 @@ class ChildActivity : AppCompatActivity() {
     private lateinit var pairingCode: EditText
     private lateinit var status: TextView
     private var session: GuardianSession? = null
+    private val updater by lazy { GuardianUpdater(this) }
+    private lateinit var updateToken: EditText
+    private lateinit var updateStatus: TextView
+    private lateinit var installUpdateButton: MaterialButton
+    private var latestUpdate: UpdateCheckResult? = null
+    private var pendingInstallFile: File? = null
     private val prefs by lazy { getSharedPreferences("guardian_child", MODE_PRIVATE) }
     private val familyId: String get() = prefs.getString("family_id", "").orEmpty()
 
@@ -53,6 +64,7 @@ class ChildActivity : AppCompatActivity() {
         }
         scroll.addView(page)
         setContentView(scroll)
+        GuardianUpdateScheduler.schedule(this)
         session = vault.load()
         showAuth()
         if (session != null && familyId.isNotBlank()) showControls()
@@ -138,6 +150,120 @@ class ChildActivity : AppCompatActivity() {
         divider()
         status = text("Protection services are permission-gated. Android's VPN indicator appears while domain filtering is running.")
         text("Automatic policy and usage sync runs about every 15 minutes when Android allows background work.")
+        divider()
+        heading("Settings", 20)
+        heading("App Updates", 18)
+        text("Connect the private Guardian GitHub repository once to receive signed app updates.")
+        updateToken = field("GitHub fine-grained token · saved encrypted on this phone", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+        button("Save GitHub token") { saveUpdateToken() }
+        button("Check for updates") { checkForUpdates() }
+        installUpdateButton = MaterialButton(this).apply {
+            text = "Download and install update"
+            visibility = View.GONE
+            setOnClickListener { downloadAndInstallUpdate() }
+        }
+        page.addView(installUpdateButton, matchWrap().apply { bottomMargin = dp(8) })
+        updateStatus = text(if (updater.hasToken()) "GitHub token saved. Checking release…" else "Add a fine-grained token with Contents: Read-only access.")
+        if (updater.hasToken()) checkForUpdates()
+    }
+
+
+    private fun saveUpdateToken() {
+        try {
+            updater.saveToken(updateToken.text.toString())
+            updateToken.setText("")
+            updateStatus.text = "Token saved encrypted with Android Keystore."
+            requestUpdateNotificationPermission()
+            checkForUpdates()
+        } catch (e: Exception) {
+            updateStatus.text = "Token not saved: " + (e.message ?: "invalid token")
+        }
+    }
+
+    private fun requestUpdateNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 7311)
+        }
+    }
+
+    private fun checkForUpdates() {
+        updateStatus.text = "Checking the latest signed GitHub release…"
+        io.execute {
+            try {
+                val result = updater.checkForUpdate()
+                updater.notifyIfAvailable(result)
+                runOnUiThread {
+                    latestUpdate = result
+                    updateStatus.text = result.message
+                    installUpdateButton.visibility = if (result.updateAvailable) View.VISIBLE else View.GONE
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    latestUpdate = null
+                    installUpdateButton.visibility = View.GONE
+                    updateStatus.text = "Update check failed: " + (e.message ?: "network or token error")
+                }
+            }
+        }
+    }
+
+    private fun downloadAndInstallUpdate() {
+        val release = latestUpdate?.release
+        if (release == null || latestUpdate?.updateAvailable != true) {
+            updateStatus.text = "Check for updates first."
+            return
+        }
+        installUpdateButton.isEnabled = false
+        updateStatus.text = "Downloading " + release.assetName + "…"
+        io.execute {
+            try {
+                val file = updater.download(release)
+                runOnUiThread {
+                    installUpdateButton.isEnabled = true
+                    updateStatus.text = "Download complete. Opening Android installer…"
+                    installDownloadedApk(file)
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    installUpdateButton.isEnabled = true
+                    updateStatus.text = "Download failed: " + (e.message ?: "unknown error")
+                }
+            }
+        }
+    }
+
+    private fun installDownloadedApk(file: File) {
+        if (!file.isFile) {
+            updateStatus.text = "Downloaded APK is no longer available. Download it again."
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            pendingInstallFile = file
+            updateStatus.text = "Allow Guardian Child to install updates, then return here."
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + packageName)))
+            return
+        }
+        launchAndroidInstaller(file)
+    }
+
+    private fun launchAndroidInstaller(file: File) {
+        val uri = FileProvider.getUriForFile(this, packageName + ".fileprovider", file)
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(installIntent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val file = pendingInstallFile
+        if (file != null && (Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls())) {
+            pendingInstallFile = null
+            launchAndroidInstaller(file)
+        }
     }
 
     private fun requestVpn() {
