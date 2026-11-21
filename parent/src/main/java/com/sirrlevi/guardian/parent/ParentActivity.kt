@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
@@ -22,6 +23,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -33,6 +35,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.sirrlevi.guardian.core.GuardianApi
+import com.sirrlevi.guardian.core.UpdateRules
 import com.sirrlevi.guardian.core.GuardianSession
 import java.io.File
 import java.text.DateFormat
@@ -115,6 +118,8 @@ class ParentActivity : AppCompatActivity() {
     private lateinit var updateTokenField: EditText
     private lateinit var updateStatusView: TextView
     private lateinit var installUpdateButton: MaterialButton
+    private lateinit var updateProgress: ProgressBar
+    private lateinit var updateNotesView: TextView
     private val navViews = linkedMapOf<String, TextView>()
     private val refreshHandler = Handler(Looper.getMainLooper())
     private val autoRefresh = object : Runnable {
@@ -288,7 +293,7 @@ class ParentActivity : AppCompatActivity() {
         refreshHandler.removeCallbacks(autoRefresh)
         refreshHandler.postDelayed(autoRefresh, 30_000L)
         if (updater.hasToken()) {
-            // The background worker also checks releases approximately every six hours.
+            // The background worker also checks releases about every 15 minutes.
             checkForUpdates(false)
         }
     }
@@ -508,7 +513,8 @@ class ParentActivity : AppCompatActivity() {
         val account = sectionCard("Parent account")
         label(account, session?.uid ?: "No active account", 12, COLOR_TEXT)
         actionButton(account, "Refresh child reports") { refreshDevices(false) }
-        val update = sectionCard("App updates", "Checks the private GitHub Releases feed for Guardian-Parent.apk.")
+        val update = sectionCard("Check for updates", "Downloads the latest signed Guardian Parent build from your private GitHub Releases.")
+        label(update, "Installed: v" + BuildConfig.VERSION_NAME + " (build " + BuildConfig.VERSION_CODE + ")", 13, COLOR_TEXT, true)
         note(update, "Save a fine-grained GitHub token for this private repository with Contents: Read-only access. It is encrypted with Android Keystore on this device.")
         updateTokenField = input(update, if (updater.hasToken()) "Token saved · enter a new token to replace" else "GitHub fine-grained token", InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
         val actions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -520,7 +526,14 @@ class ParentActivity : AppCompatActivity() {
         }
         update.addView(installUpdateButton, matchWrap().apply { topMargin = dp(7) })
         updateStatusView = label(update, if (updater.hasToken()) "Token saved. Checking release…" else "No update token saved.", 12, COLOR_MUTED)
-        note(update, "Automatic checks run about every six hours when Android allows background work. The Android package installer still asks you to confirm installation.")
+        updateProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            visibility = View.GONE
+            progressTintList = ColorStateList.valueOf(COLOR_ACCENT)
+        }
+        update.addView(updateProgress, matchWrap().apply { topMargin = dp(8) })
+        updateNotesView = note(update, "").apply { visibility = View.GONE }
+        note(update, "Guardian checks for new builds in the background about every 15 minutes (Android may delay this) and shows a notification when one is ready. Android's installer still asks you to confirm; your data and settings are kept.")
         val diag = sectionCard("Device sync")
         note(diag, "Parent refresh interval: 30 seconds while this screen is open.")
         note(diag, "Last report pull: " + if (lastRefreshAt > 0L) formatDate(lastRefreshAt) else "Not yet")
@@ -712,8 +725,17 @@ class ParentActivity : AppCompatActivity() {
                 runOnUiThread {
                     latestUpdate = result
                     if (::updateStatusView.isInitialized) {
-                        updateStatusView.text = result.message
+                        updateStatusView.text = result.message + "\nLast checked: " + formatDate(updater.lastCheckedAt())
                         installUpdateButton.visibility = if (result.updateAvailable) View.VISIBLE else View.GONE
+                        if (::updateNotesView.isInitialized) {
+                            val notes = result.release?.notes?.trim().orEmpty()
+                            if (result.updateAvailable && notes.isNotEmpty()) {
+                                updateNotesView.text = "What's new:\n" + notes.take(400)
+                                updateNotesView.visibility = View.VISIBLE
+                            } else {
+                                updateNotesView.visibility = View.GONE
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -735,18 +757,31 @@ class ParentActivity : AppCompatActivity() {
             return
         }
         installUpdateButton.isEnabled = false
-        updateStatusView.text = "Downloading " + release.assetName + "…"
+        updateProgress.progress = 0
+        updateProgress.visibility = View.VISIBLE
+        updateStatusView.text = "Downloading " + release.title + "…"
         io.execute {
             try {
-                val file = updater.download(release)
+                val file = updater.download(release) { done, total ->
+                    runOnUiThread {
+                        if (::updateProgress.isInitialized) {
+                            val percent = UpdateRules.percent(done, total)
+                            updateProgress.progress = percent
+                            updateStatusView.text = "Downloading… " + UpdateRules.formatSize(done) +
+                                " of " + UpdateRules.formatSize(total) + " (" + percent + "%)"
+                        }
+                    }
+                }
                 runOnUiThread {
                     installUpdateButton.isEnabled = true
+                    if (::updateProgress.isInitialized) updateProgress.visibility = View.GONE
                     updateStatusView.text = "Download complete. Opening Android installer…"
                     installDownloadedApk(file)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     installUpdateButton.isEnabled = true
+                    if (::updateProgress.isInitialized) updateProgress.visibility = View.GONE
                     updateStatusView.text = "Download failed: " + (e.message ?: "unknown error")
                 }
             }

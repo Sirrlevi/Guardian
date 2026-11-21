@@ -72,7 +72,18 @@ jobs:
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Persistent signing secrets are missing. Debug APKs will be built for CI only; no update release will be published."
+            missing=""
+            for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+              if [ -z "${!name}" ]; then missing="$missing $name"; fi
+            done
+            echo "::warning::Signed release NOT published. Missing repository secrets:$missing. In-app updates cannot find a new build until they are added."
+            {
+              echo "### Signed release was NOT published"
+              echo
+              echo "Missing repository secrets:$missing"
+              echo
+              echo "Add them under Settings -> Secrets and variables -> Actions, then re-run this workflow. Until then the apps have no update to find."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Build signed release APKs
@@ -128,3 +139,13 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summarize published release
+        if: steps.signing.outputs.ready == 'true'
+        run: |
+          {
+            echo "### Signed release published"
+            echo
+            echo "Tag: guardian-v1.0.${{ github.run_number }} (versionCode ${{ github.run_number }})"
+            echo "Assets: Guardian-Parent.apk, Guardian-Child.apk"
+          } >> "$GITHUB_STEP_SUMMARY"

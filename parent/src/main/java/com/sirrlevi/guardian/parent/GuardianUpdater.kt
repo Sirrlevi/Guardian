@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
+import com.sirrlevi.guardian.core.UpdateRules
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -67,22 +68,19 @@ class GuardianUpdater(context: Context) {
     fun checkForUpdate(): UpdateCheckResult {
         val token = readToken() ?: throw IllegalStateException("Add a GitHub fine-grained token in Settings first.")
         val current = currentVersionCode()
-        val expectedAsset = when (app.packageName) {
-            "com.sirrlevi.guardian.parent" -> "Guardian-Parent.apk"
-            "com.sirrlevi.guardian.child" -> "Guardian-Child.apk"
-            else -> throw IllegalStateException("This Guardian package is not supported by the updater.")
-        }
+        val expectedAsset = UpdateRules.assetNameFor(app.packageName)
+            ?: throw IllegalStateException("This Guardian package is not supported by the updater.")
 
         val response = requestJson("$apiBase/releases/latest", token)
         val tag = response.stringValue("tag_name")
-        val version = Regex("""(\d+)$""").find(tag)?.groupValues?.get(1)?.toIntOrNull()
+        val version = UpdateRules.versionFromTag(tag)
             ?: throw IOException("Latest release has an invalid version tag: $tag")
         val assets = response.getAsJsonArray("assets")
             ?: throw IOException("The latest release has no APK assets.")
         val asset = assets.firstOrNull {
             it.isJsonObject && it.asJsonObject.stringValue("name") == expectedAsset
         }?.asJsonObject ?: throw IOException(
-            "Latest release does not contain $expectedAsset. A signed release build is required."
+            "Latest release " + tag + " has no " + expectedAsset + ". A signed release build has not been published yet."
         )
 
         val release = GuardianRelease(
@@ -95,13 +93,27 @@ class GuardianUpdater(context: Context) {
             assetSize = asset.get("size")?.asLong ?: 0L,
             pageUrl = response.stringValue("html_url")
         )
-        val available = release.versionCode > current
+        val available = UpdateRules.isNewer(release.versionCode, current)
+        prefs.edit().putLong("last_checked_at", System.currentTimeMillis()).apply()
+        if (!available) cleanupDownloads()
         val message = when {
             available -> "Update available · " + release.title + " (version " + release.versionCode + ")"
             release.versionCode == current -> "You're up to date · version " + current
             else -> "Installed version " + current + " is newer than the latest release " + release.versionCode + "."
         }
         return UpdateCheckResult(current, release, available, message)
+    }
+
+    fun lastCheckedAt(): Long = prefs.getLong("last_checked_at", 0L)
+
+    /** Deletes downloaded update APKs that are no longer newer than the installed build. */
+    fun cleanupDownloads() {
+        val current = currentVersionCode()
+        File(app.filesDir, "updates").listFiles()?.forEach { file ->
+            val version = Regex("""guardian-update-(\d+)\.apk""").matchEntire(file.name)
+                ?.groupValues?.get(1)?.toIntOrNull()
+            if (version == null || version <= current) file.delete()
+        }
     }
 
     fun notifyIfAvailable(result: UpdateCheckResult) {
@@ -133,8 +145,8 @@ class GuardianUpdater(context: Context) {
         val notification = NotificationCompat.Builder(app, channelId)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Guardian update available")
-            .setContentText("Version " + release.versionCode + " is ready. Tap to open App Updates.")
-            .setStyle(NotificationCompat.BigTextStyle().bigText("A new " + release.title + " build is ready. Open Guardian → Settings → App Updates to download and install it."))
+            .setContentText("Version " + release.versionCode + " is ready. Tap to download and install.")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("A new " + release.title + " build is ready. Tap to open Guardian → Settings → Check for updates, then download and install it. Your data and settings are kept."))
             .setContentIntent(pending)
             .setAutoCancel(true)
             .build()
@@ -143,7 +155,7 @@ class GuardianUpdater(context: Context) {
     }
 
     @Throws(IOException::class)
-    fun download(release: GuardianRelease): File {
+    fun download(release: GuardianRelease, onProgress: (Long, Long) -> Unit = { _, _ -> }): File {
         val token = readToken() ?: throw IllegalStateException("GitHub token is not saved.")
         val apiUrl = "$apiBase/releases/assets/" + release.assetId
         val apiConnection = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
@@ -195,14 +207,26 @@ class GuardianUpdater(context: Context) {
             stream.use { input ->
                 FileOutputStream(output).use { fileOut ->
                     val buffer = ByteArray(16 * 1024)
+                    var written = 0L
+                    var lastReport = 0L
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
                         fileOut.write(buffer, 0, count)
+                        written += count
+                        val now = System.currentTimeMillis()
+                        if (now - lastReport >= 150L) {
+                            lastReport = now
+                            onProgress(written, release.assetSize)
+                        }
                     }
                     fileOut.fd.sync()
+                    onProgress(written, release.assetSize)
                 }
             }
+        } catch (e: Exception) {
+            output.delete()
+            throw e
         } finally {
             apiConnection.disconnect()
         }
@@ -243,8 +267,7 @@ class GuardianUpdater(context: Context) {
         try {
             val code = connection.responseCode
             if (code !in 200..299) {
-                val detail = try { connection.errorStream?.bufferedReader()?.use { it.readText() }?.take(250) } catch (_: Exception) { null }
-                throw IOException("GitHub update check failed (HTTP $code). " + detail.orEmpty())
+                throw IOException(UpdateRules.explainHttpFailure(code) + " (HTTP " + code + ")")
             }
             return JsonParser.parseString(connection.inputStream.bufferedReader().use { it.readText() }).asJsonObject
         } finally {

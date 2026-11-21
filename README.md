@@ -65,18 +65,19 @@ The keystore is decoded only on the runner and is ignored by Git. Without these 
 
 ## In-app updates (Parent + Child)
 
-Both apps include **Settings → App Updates**:
+Both apps include **Settings → Check for updates**:
 
 - Save one GitHub fine-grained personal access token on each phone.
 - Check manually, on app launch, and periodically in the background (WorkManager, about every 15 minutes when Android permits (the OS may delay runs)).
-- A notification is posted once per newly detected signed release. Tapping it opens the App Updates tab directly; download and install are available there.
+- A notification is posted once per newly detected signed release. Tapping it opens Settings → Check for updates directly; download (with a progress bar) and install are available there.
 - The updater downloads only the APK matching the installed app (Parent or Child) from the latest GitHub Release and checks the asset size/archive before handing it to Android's package installer.
 - Android asks the user to allow installs from Guardian and confirm the update. Silent installation is not available to an ordinary app.
 - App data stays in place for an in-place update when application ID and signing certificate match. Do not uninstall or clear app storage.
+- Android stops services and cancels background jobs when it replaces an app. Both apps handle the package-replaced broadcast to re-arm update checks, and the child also re-arms usage sync and (if it was running and VPN consent still exists) the DNS filter.
 
 ### GitHub updater token
 
-Create a fine-grained personal access token for resource owner `Sirrlevi`, restrict it to **only** the `Guardian` repository, and grant **Contents: Read-only** repository permission. Paste the token into Settings → App Updates on both phones. It is encrypted locally using Android Keystore. Do not commit it, put it in source code, or add it as an APK build constant. Use an expiry date and rotate/revoke it if a phone is lost.
+Create a fine-grained personal access token for resource owner `Sirrlevi`, restrict it to **only** the `Guardian` repository, and grant **Contents: Read-only** repository permission. Paste the token into Settings → Check for updates on both phones. It is encrypted locally using Android Keystore. Do not commit it, put it in source code, or add it as an APK build constant. Use an expiry date and rotate/revoke it if a phone is lost.
 
 ### Mandatory persistent Android signing
 

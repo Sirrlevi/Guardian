@@ -22,6 +22,8 @@ class DomainFilterVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         active = true
+        // Remembered so the filter can be restarted after an in-place app update.
+        getSharedPreferences("guardian_child", MODE_PRIVATE).edit().putBoolean("vpn_wanted", true).apply()
         startForeground(NOTIFICATION_ID, notification())
         if (tunnel == null) establishTunnel()
         return START_STICKY
@@ -193,6 +195,7 @@ class DomainFilterVpnService : VpnService() {
 
     override fun onRevoke() {
         active = false
+        getSharedPreferences("guardian_child", MODE_PRIVATE).edit().putBoolean("vpn_wanted", false).apply()
         tunnel?.close()
         tunnel = null
         stopSelf()
