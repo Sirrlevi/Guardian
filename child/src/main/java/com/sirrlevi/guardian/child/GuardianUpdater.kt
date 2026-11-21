@@ -252,18 +252,22 @@ class GuardianUpdater(context: Context) {
     private fun JsonObject.stringValue(name: String): String =
         try { get(name)?.takeIf { !it.isJsonNull }?.asString.orEmpty() } catch (_: Exception) { "" }
 
-    private fun readToken(): String? = try {
-        val packed = prefs.getString("github_token", null) ?: return null
-        val bytes = Base64.decode(packed, Base64.NO_WRAP)
-        require(bytes.size > 12)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(
-            Cipher.DECRYPT_MODE,
-            getKey(),
-            javax.crypto.spec.GCMParameterSpec(128, bytes.copyOfRange(0, 12))
-        )
-        String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
-    } catch (_: Exception) { null }
+    private fun readToken(): String? {
+        return try {
+            val packed = prefs.getString("github_token", null) ?: return null
+            val bytes = Base64.decode(packed, Base64.NO_WRAP)
+            require(bytes.size > 12)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                getKey(),
+                javax.crypto.spec.GCMParameterSpec(128, bytes.copyOfRange(0, 12))
+            )
+            String(cipher.doFinal(bytes.copyOfRange(12, bytes.size)), Charsets.UTF_8)
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun getKey(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
