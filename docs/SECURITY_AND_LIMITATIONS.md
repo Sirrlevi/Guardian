@@ -29,6 +29,39 @@ The GitHub Actions workflow always runs unit tests and builds both debug APKs. I
 
 Build versions use the GitHub Actions run number. Each successful push creates a latest GitHub Release and uploads both Parent and Child APKs.
 
+## In-app update system
+
+The Parent and Child apps each include an App Updates section. They query the private repository's latest GitHub Release when the app opens, when the user taps Check for updates, and periodically in the background (approximately every 6 hours, subject to Android's WorkManager scheduling). New releases trigger a notification once per version when notifications are permitted. The updater downloads only the matching app asset and verifies its reported size and ZIP/APK signature bytes before opening Android's system package installer.
+
+### Private-repository access
+
+Create a GitHub fine-grained personal access token for resource owner `Sirrlevi`, select only the `Guardian` repository, and grant **Contents: Read-only** repository permission. Enter it in Settings → App Updates on each phone. The token is encrypted locally with Android Keystore; it is not embedded in the APK or in the source tree. Use an expiry date, keep the token private, and revoke/replace it if a phone is lost. A token stored on a device is still a credential and the device should be protected.
+
+### Persistent update signing
+
+Android requires an APK update to be signed with the same certificate as the installed package. Generate one keystore before the first installation:
+
+```bash
+keytool -genkeypair -v -keystore guardian-release.jks -alias guardian-release -keyalg RSA -keysize 2048 -validity 10000
+base64 -w 0 guardian-release.jks > guardian-release.base64
+```
+
+Add the following repository Actions secrets:
+
+- `ANDROID_KEYSTORE_BASE64`: contents of `guardian-release.base64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`: `guardian-release`
+- `ANDROID_KEY_PASSWORD`
+
+Keep a secure backup of the keystore and passwords. Never rotate the signing key for an app already distributed to devices. The workflow builds debug APKs for CI, but publishes a new GitHub Release only when both release APKs have been signed with the persistent keystore. Consequently, a push whose tests fail—or a successful build without signing secrets—does not create an update for the apps.
+
+### Update limitations and preserved data
+
+- Android still displays its package-installer confirmation. Guardian cannot silently install updates on ordinary devices.
+- The first installation must come from the persistent-key signed release. Previously installed debug APKs signed by a different runner key must be uninstalled first; do this before account creation/pairing because uninstalling clears local data.
+- A normal in-place update preserves app-private SharedPreferences and Android Keystore-backed session/token data. Uninstalling the app or clearing its storage does not.
+- Background update checks are best-effort, not instant push delivery. Android can delay periodic work because of battery and network policies. Manual Check for updates is available at any time.
+
 ## Transparency
 
 This project is designed for disclosed parental controls on an authorized, supervised child device. It shows the VPN indicator and persistent filtering notification, requests Android permissions through system UI, and does not hide itself or bypass OS consent. Do not use it for covert monitoring or on a device without appropriate authority and disclosure.
