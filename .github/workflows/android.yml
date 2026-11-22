@@ -56,6 +56,28 @@ jobs:
             :parent:assembleDebug \
             :child:assembleDebug
 
+      - name: Lint (Parent and Child)
+        continue-on-error: true
+        env:
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
+        run: |
+          gradle --no-daemon :parent:lintDebug :child:lintDebug
+
+      - name: Verify debug APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/35.0.0)"
+          for pair in "parent:com.sirrlevi.guardian.parent" "child:com.sirrlevi.guardian.child"; do
+            module="${pair%%:*}"; pkg="${pair##*:}"
+            apk="$(ls $module/build/outputs/apk/debug/*.apk | head -n 1)"
+            badging="$("$BT/aapt2" dump badging "$apk")"
+            echo "$badging" | grep -q "package: name='$pkg'" || { echo "::error::$apk has the wrong package name"; exit 1; }
+            echo "$badging" | head -n 1
+          done
+          echo "Debug APK package names verified." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Configure persistent release signing
         id: signing
         env:
@@ -108,6 +130,34 @@ jobs:
           cp parent/build/outputs/apk/release/parent-release.apk release-assets/Guardian-Parent.apk
           cp child/build/outputs/apk/release/child-release.apk release-assets/Guardian-Child.apk
           echo "mode=Persistent-key signed release" >> "$GITHUB_OUTPUT"
+
+      - name: Verify signed release APKs
+        if: steps.signing.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/35.0.0)"
+          certs=""
+          for pair in "Parent:com.sirrlevi.guardian.parent" "Child:com.sirrlevi.guardian.child"; do
+            name="${pair%%:*}"; pkg="${pair##*:}"
+            apk="release-assets/Guardian-$name.apk"
+            "$BT/apksigner" verify --verbose "$apk"
+            badging="$("$BT/aapt2" dump badging "$apk")"
+            echo "$badging" | grep -q "package: name='$pkg'" || { echo "::error::$apk has the wrong package name"; exit 1; }
+            echo "$badging" | grep -q "versionCode='${{ github.run_number }}'" || { echo "::error::$apk has an unexpected versionCode"; exit 1; }
+            if "$BT/apksigner" verify --print-certs "$apk" | grep -qi "Android Debug"; then
+              echo "::error::$apk is signed with the Android debug key"; exit 1
+            fi
+            cert="$("$BT/apksigner" verify --print-certs "$apk" | grep -m1 'certificate SHA-256 digest' | awk '{print $NF}')"
+            echo "$name signer SHA-256: $cert"
+            certs="$certs $cert"
+          done
+          unique="$(echo $certs | tr ' ' '\n' | sort -u | wc -l)"
+          [ "$unique" -eq 1 ] || { echo "::error::Parent and Child are not signed with the same key"; exit 1; }
+          {
+            echo "### Signed APKs verified"
+            echo "Both APKs verify with apksigner, have the expected package names and versionCode ${{ github.run_number }}, and share one persistent signing key."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK artifacts
         continue-on-error: true
