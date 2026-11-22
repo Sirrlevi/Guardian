@@ -49,17 +49,37 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Cache Robolectric Android jar
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('parent/build.gradle.kts', 'child/build.gradle.kts') }}
+
       - name: Run tests and build debug APKs
+        shell: bash
         env:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
           FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
         run: |
-          gradle --no-daemon clean \
-            :core:test \
-            :parent:testDebugUnitTest \
-            :child:testDebugUnitTest \
-            :parent:assembleDebug \
-            :child:assembleDebug
+          # Robolectric downloads an Android jar from Maven Central on a cold cache, and Maven Central sometimes
+          # answers HTTP 429 (rate limit). Retry only for that infrastructure error, never for real test failures.
+          tasks=":core:test :parent:testDebugUnitTest :child:testDebugUnitTest :parent:assembleDebug :child:assembleDebug"
+          status=1
+          for attempt in 1 2 3; do
+            if [ "$attempt" -eq 1 ]; then clean="clean"; else clean=""; fi
+            set +e
+            gradle --no-daemon $clean $tasks 2>&1 | tee gradle-build.log
+            status=${PIPESTATUS[0]}
+            set -e
+            [ "$status" -eq 0 ] && break
+            if grep -q "HTTP response code: 429" gradle-build.log && [ "$attempt" -lt 3 ]; then
+              echo "::warning::Maven Central rate-limited the Robolectric download (HTTP 429). Retrying in 60 seconds (attempt $attempt of 3)."
+              sleep 60
+            else
+              break
+            fi
+          done
+          exit "$status"
 
       - name: Lint (Parent and Child)
         env:
