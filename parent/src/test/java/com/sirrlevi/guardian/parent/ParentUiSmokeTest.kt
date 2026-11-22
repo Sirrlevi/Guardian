@@ -3,7 +3,9 @@ package com.sirrlevi.guardian.parent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -96,7 +98,13 @@ class ParentUiSmokeTest {
         rule.waitForIdle()
         rule.onAllNodesWithText("YouTube")[0].performClick()
         rule.waitForIdle()
-        rule.onNodeWithText("Block this app").assertExists()
+        try {
+            rule.onNodeWithText("Block this app").assertExists()
+        } catch (e: AssertionError) {
+            val roots = rule.onAllNodes(isRoot())
+            val dump = (0 until roots.fetchSemanticsNodes().size).joinToString("\n=====ROOT=====\n") { roots[it].printToString(maxDepth = 12) }
+            throw AssertionError("Sheet did not open. " + e.message + "\n" + dump, e)
+        }
         assertTrue(rule.onAllNodesWithText("Fine-tune (up to 12 hours)").fetchSemanticsNodes().isNotEmpty())
     }
 
