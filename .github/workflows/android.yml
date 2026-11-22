@@ -4,6 +4,11 @@ on:
   push:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      signing_selftest:
+        description: "Dry-run the signed release path with a throwaway key (nothing is published)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -79,22 +84,39 @@ jobs:
 
       - name: Configure persistent release signing
         id: signing
+        shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          SELFTEST: ${{ inputs.signing_selftest }}
         run: |
-          if [ -n "$ANDROID_KEYSTORE_BASE64" ] &&
-             [ -n "$ANDROID_KEYSTORE_PASSWORD" ] &&
-             [ -n "$ANDROID_KEY_ALIAS" ] &&
-             [ -n "$ANDROID_KEY_PASSWORD" ]; then
-            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > guardian-release.jks
+          set -euo pipefail
+          if [ "${SELFTEST:-false}" = "true" ]; then
+            # Dry run of the whole signed path with a throwaway key made on this runner. Nothing is published.
+            pw="$(openssl rand -hex 16)"
+            echo "::add-mask::$pw"
+            keytool -genkeypair -keystore guardian-release.jks -storetype PKCS12 -alias selftest \
+              -keyalg RSA -keysize 2048 -validity 3650 -storepass "$pw" -keypass "$pw" \
+              -dname "CN=Guardian Signing Selftest, O=Throwaway" >/dev/null 2>&1
+            echo "SELFTEST_PASSWORD=$pw" >> "$GITHUB_ENV"
             echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "selftest=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Signing SELF-TEST with a throwaway key. Nothing will be published."
+          elif [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            # Tolerate spaces/newlines that sneak in when the secret is pasted from a phone.
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d ' \r\n\t' | base64 --decode > guardian-release.jks \
+              || { echo "::error::ANDROID_KEYSTORE_BASE64 is not valid base64. Paste the whole value again."; exit 1; }
+            pw="$(printf '%s' "$ANDROID_KEYSTORE_PASSWORD" | tr -d '\r\n')"
+            keytool -list -keystore guardian-release.jks -storepass "$pw" > keystore-list.txt 2>&1 \
+              || { echo "::error::The keystore could not be opened. Check ANDROID_KEYSTORE_PASSWORD and that ANDROID_KEYSTORE_BASE64 is complete."; exit 1; }
+            rm -f keystore-list.txt
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "selftest=false" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "selftest=false" >> "$GITHUB_OUTPUT"
             missing=""
-            for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD; do
               if [ -z "${!name}" ]; then missing="$missing $name"; fi
             done
             echo "::warning::Signed release NOT published. Missing repository secrets:$missing. In-app updates cannot find a new build until they are added."
@@ -104,18 +126,30 @@ jobs:
               echo "Missing repository secrets:$missing"
               echo
               echo "Add them under Settings -> Secrets and variables -> Actions, then re-run this workflow. Until then the apps have no update to find."
+              echo "(ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD are optional: the alias is read from the keystore and the key password defaults to the keystore password.)"
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Build signed release APKs
         if: steps.signing.outputs.ready == 'true'
+        shell: bash
         env:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
           FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          SECRET_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SECRET_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SECRET_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          store_pw="${SELFTEST_PASSWORD:-$(printf '%s' "$SECRET_KEYSTORE_PASSWORD" | tr -d '\r\n')}"
+          key_pw="$(printf '%s' "${SECRET_KEY_PASSWORD:-$store_pw}" | tr -d '\r\n')"
+          alias_name="$(printf '%s' "$SECRET_KEY_ALIAS" | tr -d '\r\n')"
+          if [ -z "$alias_name" ]; then
+            alias_name="$(keytool -list -keystore guardian-release.jks -storepass "$store_pw" 2>/dev/null | awk -F', ' '/PrivateKeyEntry/{print $1; exit}')"
+          fi
+          [ -n "$alias_name" ] || { echo "::error::No private key found in the keystore."; exit 1; }
+          echo "Signing with key alias: $alias_name"
+          export ANDROID_KEYSTORE_PASSWORD="$store_pw" ANDROID_KEY_PASSWORD="$key_pw" ANDROID_KEY_ALIAS="$alias_name"
           gradle --no-daemon :parent:assembleRelease :child:assembleRelease
 
       - name: Prepare signed release assets
@@ -133,6 +167,8 @@ jobs:
       - name: Verify signed release APKs
         if: steps.signing.outputs.ready == 'true'
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           BT="$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/build-tools/35.0.0)"
@@ -153,12 +189,37 @@ jobs:
           done
           unique="$(echo $certs | tr ' ' '\n' | sort -u | wc -l)"
           [ "$unique" -eq 1 ] || { echo "::error::Parent and Child are not signed with the same key"; exit 1; }
+          signer="$(echo $certs | awk '{print $1}')"
+
+          # An update only installs in place when the signer matches the previous release. Fail loudly instead of
+          # publishing a build that every phone would refuse.
+          prev_note="No earlier signed release to compare with (this is the first one)."
+          if [ "${{ steps.signing.outputs.selftest }}" != "true" ]; then
+            prev_tag="$(gh api "repos/${{ github.repository }}/releases?per_page=30" \
+              --jq '[.[] | select((.draft|not) and (.prerelease|not)) | select(any(.assets[]; .name == "Guardian-Parent.apk"))] | .[0].tag_name // empty' || true)"
+            if [ -n "$prev_tag" ]; then
+              mkdir -p prev-release
+              if gh release download "$prev_tag" -R "${{ github.repository }}" -p Guardian-Parent.apk -D prev-release --clobber; then
+                prev_cert="$("$BT/apksigner" verify --print-certs prev-release/Guardian-Parent.apk | grep -m1 'certificate SHA-256 digest' | awk '{print $NF}')"
+                [ "$prev_cert" = "$signer" ] || { echo "::error::The signing key differs from release $prev_tag. Phones would refuse this update. Restore the original keystore secrets."; exit 1; }
+                prev_note="Same signing key as $prev_tag, so phones update in place."
+              else
+                echo "::warning::Could not download $prev_tag to compare signing keys."
+                prev_note="Could not compare with $prev_tag."
+              fi
+            fi
+          fi
           {
             echo "### Signed APKs verified"
-            echo "Both APKs verify with apksigner, have the expected package names and versionCode ${{ github.run_number }}, and share one persistent signing key."
+            echo "Both APKs verify with apksigner, have the expected package names and versionCode ${{ github.run_number }}, and share one signing key."
+            echo
+            echo "Signer SHA-256: \`$signer\`"
+            echo
+            echo "$prev_note"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK artifacts
+        if: steps.signing.outputs.selftest != 'true'
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -185,7 +246,7 @@ jobs:
           gh release create "$tag" debug-assets/*.apk \
             --target "${{ github.sha }}" --prerelease --latest=false \
             --title "Guardian debug build ${{ github.run_number }} (testing only)" \
-            --notes "Debug-signed test build from commit ${{ github.sha }}. NOT used by in-app updates (pre-release). Add the four signing secrets to get signed releases that update in place."
+            --notes "Debug-signed test build from commit ${{ github.sha }}. NOT used by in-app updates (pre-release). Add the signing secrets (ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD) to get signed releases that update in place."
           gh release list --limit 100 --json tagName,isPrerelease \
             -q '.[] | select(.isPrerelease and (.tagName | startswith("guardian-debug-"))) | .tagName' \
             | tail -n +4 | while read -r old; do gh release delete "$old" --cleanup-tag -y; done
@@ -195,7 +256,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish latest signed APK release
-        if: steps.signing.outputs.ready == 'true'
+        if: steps.signing.outputs.ready == 'true' && steps.signing.outputs.selftest != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: guardian-v1.0.${{ github.run_number }}
@@ -213,7 +274,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summarize published release
-        if: steps.signing.outputs.ready == 'true'
+        if: steps.signing.outputs.ready == 'true' && steps.signing.outputs.selftest != 'true'
         run: |
           {
             echo "### Signed release published"

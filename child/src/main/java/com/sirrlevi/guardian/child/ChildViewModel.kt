@@ -24,6 +24,7 @@ import com.sirrlevi.guardian.core.FamilyPolicy
 import com.sirrlevi.guardian.core.GuardianPaths
 import com.sirrlevi.guardian.core.PkgKey
 import com.sirrlevi.guardian.core.PolicyCodec
+import com.sirrlevi.guardian.core.UpdateBlockedException
 import com.sirrlevi.guardian.core.UpdateRules
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -72,13 +73,15 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
     var updateProgress by mutableIntStateOf(-1); private set
     var lastUpdateCheck by mutableLongStateOf(updater.lastCheckedAt()); private set
     var installRequest by mutableStateOf<File?>(null)
+    /** Set when this phone cannot be updated in place (debug build / different signing key): browser link to the APK. */
+    var reinstallUrl by mutableStateOf<String?>(null); private set
 
     init {
         phase = if (cloud.isPaired()) Phase.Paired else Phase.Unpaired
         if (phase == Phase.Paired) {
             refreshLocal()
             loadToday()
-            if (hasToken) checkUpdates(false)
+            checkUpdates(false)
         }
     }
 
@@ -292,6 +295,7 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.Main) {
                     updateResult = result
                     updateStatus = result.message
+                    reinstallUrl = result.reinstallUrl.ifBlank { null }
                     lastUpdateCheck = updater.lastCheckedAt()
                     updateBusy = false
                 }
@@ -328,6 +332,13 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
                     updateProgress = -1
                     updateStatus = "Download complete. Opening the Android installer…"
                     installRequest = file
+                }
+            } catch (e: UpdateBlockedException) {
+                withContext(Dispatchers.Main) {
+                    updateBusy = false
+                    updateProgress = -1
+                    reinstallUrl = e.downloadUrl
+                    updateStatus = e.message ?: UpdateRules.signatureMismatchMessage()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {

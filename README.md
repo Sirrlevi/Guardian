@@ -54,30 +54,33 @@ Do not use this on a phone you are not authorized to manage. Device Owner provis
 
 GitHub Actions uses Java 17 and Gradle 8.9. It runs core and Android unit-test tasks, builds both debug APKs, uploads them as an artifact, and creates a latest GitHub Release.
 
-For stable release signing, configure these repository Actions secrets:
+For stable release signing, configure these two repository Actions secrets:
 
 - ANDROID_KEYSTORE_BASE64
 - ANDROID_KEYSTORE_PASSWORD
-- ANDROID_KEY_ALIAS
-- ANDROID_KEY_PASSWORD
 
-The keystore is decoded only on the runner and is ignored by Git. Without these secrets the workflow publishes debug APKs for testing; debug signing is not a durable update identity across hosted runners.
+`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` are optional: the alias is read from the keystore and the key password defaults to the keystore password.
+
+The keystore is decoded only on the runner and is ignored by Git. Without these secrets the workflow publishes debug APKs as a *pre-release* for testing; debug signing is not a durable update identity across hosted runners, and in-app updates ignore pre-releases.
+
+Run the workflow manually with **signing_selftest** enabled to dry-run the whole signed-release path (build, apksigner verification) with a throwaway key. Nothing is published in that mode. When real secrets exist, each release is also compared with the previous signed release and the build fails if the signing key differs.
 
 ## In-app updates (Parent + Child)
 
 Both apps include **Settings → Check for updates**:
 
-- Save one GitHub fine-grained personal access token on each phone.
+- No token is needed while the repository is public. A fine-grained token is optional (private repository, or to avoid GitHub's anonymous rate limit).
 - Check manually, on app launch, and periodically in the background (WorkManager, about every 15 minutes when Android permits (the OS may delay runs)).
 - A notification is posted once per newly detected signed release. Tapping it opens Settings → Check for updates directly; download (with a progress bar) and install are available there.
-- The updater downloads only the APK matching the installed app (Parent or Child) from the latest GitHub Release and checks the asset size/archive before handing it to Android's package installer.
+- The updater scans the release list and picks the newest non-draft, non-pre-release GitHub Release that really contains the APK for the installed app (Parent or Child). It checks the asset size/archive and that the APK is signed with the same certificate as the installed app before handing it to Android's package installer.
+- A debug build (or any build signed with another key) cannot be updated in place. The app says so and offers a browser link to the APK for a one-time reinstall.
 - Android asks the user to allow installs from Guardian and confirm the update. Silent installation is not available to an ordinary app.
 - App data stays in place for an in-place update when application ID and signing certificate match. Do not uninstall or clear app storage.
 - Android stops services and cancels background jobs when it replaces an app. Both apps handle the package-replaced broadcast to re-arm update checks, and the child also re-arms usage sync and (if it was running and VPN consent still exists) the DNS filter.
 
-### GitHub updater token
+### GitHub updater token (optional)
 
-Create a fine-grained personal access token for resource owner `Sirrlevi`, restrict it to **only** the `Guardian` repository, and grant **Contents: Read-only** repository permission. Paste the token into Settings → Check for updates on both phones. It is encrypted locally using Android Keystore. Do not commit it, put it in source code, or add it as an APK build constant. Use an expiry date and rotate/revoke it if a phone is lost.
+Only needed if the repository is private or GitHub rate-limits anonymous requests. Create a fine-grained personal access token for resource owner `Sirrlevi`, restrict it to **only** the `Guardian` repository, and grant **Contents: Read-only** repository permission. Paste the token into Settings → Check for updates on both phones. It is encrypted locally using Android Keystore. Do not commit it, put it in source code, or add it as an APK build constant. Use an expiry date and rotate/revoke it if a phone is lost.
 
 ### Mandatory persistent Android signing
 
@@ -92,8 +95,7 @@ Add these repository Actions secrets (Settings → Secrets and variables → Act
 
 - `ANDROID_KEYSTORE_BASE64`: the full single-line contents of `guardian-release.base64`
 - `ANDROID_KEYSTORE_PASSWORD`: keystore password
-- `ANDROID_KEY_ALIAS`: `guardian-release`
-- `ANDROID_KEY_PASSWORD`: key password
+- (optional) `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` if they differ from the keystore's only alias / password
 
 Never regenerate or lose this keystore after distributing the signed APKs. If it changes, Android will reject future in-place updates. The workflow may still build debug APK artifacts without the signing secrets, but it will **not publish debug APKs as updates**. A new latest Release is published only after CI passes and both APKs are signed with the persistent key.
 

@@ -14,10 +14,9 @@ class GuardianUpdateCheckWorker(context: Context, parameters: WorkerParameters) 
     override fun doWork(): Result {
         val outcome: Result = try {
             val updater = GuardianUpdater(applicationContext)
-            if (updater.hasToken()) {
-                val update = updater.checkForUpdate()
-                updater.notifyIfAvailable(update)
-            }
+            // The repository is public, so no token is needed (a saved one is used when present).
+            val update = updater.checkForUpdate()
+            updater.notifyIfAvailable(update)
             Result.success()
         } catch (_: Exception) {
             if (runAttemptCount < 3) Result.retry() else Result.failure()

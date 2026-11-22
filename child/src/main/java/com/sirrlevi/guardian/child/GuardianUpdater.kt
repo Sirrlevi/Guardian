@@ -6,15 +6,17 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.content.pm.Signature
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.google.gson.JsonObject
-import com.google.gson.JsonParser
+import com.sirrlevi.guardian.core.UpdateBlockedException
 import com.sirrlevi.guardian.core.UpdateRules
 import java.io.File
 import java.io.FileOutputStream
@@ -22,6 +24,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.KeyStore
+import java.security.MessageDigest
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -41,16 +44,23 @@ data class UpdateCheckResult(
     val currentVersion: Int,
     val release: GuardianRelease?,
     val updateAvailable: Boolean,
-    val message: String
+    val message: String,
+    /** True when this phone runs a debug build: Android cannot update it in place, a one-time reinstall is needed. */
+    val needsReinstall: Boolean = false,
+    /** Direct browser link to the APK, used for the one-time reinstall. */
+    val reinstallUrl: String = ""
 )
+
+/** A GitHub answer with a non-2xx status; turned into a readable message by [GuardianUpdater]. */
+private class HttpFailure(val code: Int) : IOException("HTTP $code")
 
 class GuardianUpdater(context: Context) {
     private val app = context.applicationContext
     private val prefs = app.getSharedPreferences("guardian_updates", Context.MODE_PRIVATE)
     private val keyAlias = "guardian_update_token_key"
-    private val repository = "Sirrlevi/Guardian"
-    private val apiBase = "https://api.github.com/repos/$repository"
+    private val apiBase = "https://api.github.com/repos/" + UpdateRules.REPOSITORY
 
+    /** The token is optional: the repository is public, so updates work without one. */
     fun hasToken(): Boolean = !readToken().isNullOrBlank()
 
     fun saveToken(raw: String) {
@@ -66,43 +76,52 @@ class GuardianUpdater(context: Context) {
     }
 
     fun checkForUpdate(): UpdateCheckResult {
-        val token = readToken() ?: throw IllegalStateException("Add a GitHub fine-grained token in Settings first.")
         val current = currentVersionCode()
         val expectedAsset = UpdateRules.assetNameFor(app.packageName)
             ?: throw IllegalStateException("This Guardian package is not supported by the updater.")
 
-        val response = requestJson("$apiBase/releases/latest", token)
-        val tag = response.stringValue("tag_name")
-        val version = UpdateRules.versionFromTag(tag)
-            ?: throw IOException("Latest release has an invalid version tag: $tag")
-        val assets = response.getAsJsonArray("assets")
-            ?: throw IOException("The latest release has no APK assets.")
-        val asset = assets.firstOrNull {
-            it.isJsonObject && it.asJsonObject.stringValue("name") == expectedAsset
-        }?.asJsonObject ?: throw IOException(
-            "Latest release " + tag + " has no " + expectedAsset + ". A signed release build has not been published yet."
-        )
+        // Look through the release list instead of only `releases/latest`: that single release may be an
+        // old or test release without this app's APK.
+        val picked = try {
+            UpdateRules.pickRelease(withToken { token -> requestText("$apiBase/releases?per_page=30", token) }, expectedAsset)
+        } catch (e: IllegalArgumentException) {
+            throw IOException(e.message ?: "GitHub sent an unexpected answer.")
+        }
+        prefs.edit().putLong("last_checked_at", System.currentTimeMillis()).apply()
+        if (picked == null) {
+            cleanupDownloads()
+            return UpdateCheckResult(current, null, false, UpdateRules.NO_RELEASE_MESSAGE)
+        }
 
         val release = GuardianRelease(
-            versionCode = version,
-            tagName = tag,
-            title = response.stringValue("name").ifBlank { tag },
-            notes = response.stringValue("body"),
-            assetId = asset.get("id")?.asLong ?: throw IOException("Release APK asset ID is missing."),
-            assetName = expectedAsset,
-            assetSize = asset.get("size")?.asLong ?: 0L,
-            pageUrl = response.stringValue("html_url")
+            versionCode = picked.versionCode,
+            tagName = picked.tag,
+            title = picked.title,
+            notes = picked.notes,
+            assetId = picked.assetId,
+            assetName = picked.assetName,
+            assetSize = picked.assetSize,
+            pageUrl = picked.pageUrl
         )
         val available = UpdateRules.isNewer(release.versionCode, current)
-        prefs.edit().putLong("last_checked_at", System.currentTimeMillis()).apply()
         if (!available) cleanupDownloads()
+        val reinstall = available && isDebugBuild()
+        val headline = "Update available · " + release.title + " (version " + release.versionCode + ")"
         val message = when {
-            available -> "Update available · " + release.title + " (version " + release.versionCode + ")"
+            reinstall -> headline + ". " + UpdateRules.debugBuildMessage()
+            available -> headline
             release.versionCode == current -> "You're up to date · version " + current
             else -> "Installed version " + current + " is newer than the latest release " + release.versionCode + "."
         }
-        return UpdateCheckResult(current, release, available, message)
+        return UpdateCheckResult(
+            current, release, available, message,
+            needsReinstall = reinstall,
+            reinstallUrl = if (reinstall) UpdateRules.directDownloadUrl(release.tagName, release.assetName) else ""
+        )
     }
+
+    private fun isDebugBuild(): Boolean =
+        (app.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
     fun lastCheckedAt(): Long = prefs.getLong("last_checked_at", 0L)
 
@@ -156,14 +175,19 @@ class GuardianUpdater(context: Context) {
 
     @Throws(IOException::class)
     fun download(release: GuardianRelease, onProgress: (Long, Long) -> Unit = { _, _ -> }): File {
-        val token = readToken() ?: throw IllegalStateException("GitHub token is not saved.")
+        val output = withToken { token -> downloadWith(token, release, onProgress) }
+        ensureSameSigner(output, release)
+        return output
+    }
+
+    private fun downloadWith(token: String?, release: GuardianRelease, onProgress: (Long, Long) -> Unit): File {
         val apiUrl = "$apiBase/releases/assets/" + release.assetId
         val apiConnection = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 20_000
             readTimeout = 60_000
             instanceFollowRedirects = false
-            setRequestProperty("Authorization", "Bearer $token")
+            if (token != null) setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("Accept", "application/octet-stream")
             setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
             setRequestProperty("User-Agent", "Guardian-Android-Updater")
@@ -195,9 +219,8 @@ class GuardianUpdater(context: Context) {
                 redirected.inputStream
             }
             else -> {
-                val code = responseCode
                 apiConnection.disconnect()
-                throw IOException("GitHub APK download failed (HTTP $code). Check token access and release assets.")
+                throw HttpFailure(responseCode)
             }
         }
 
@@ -249,34 +272,90 @@ class GuardianUpdater(context: Context) {
         return output
     }
 
+    /**
+     * Android refuses to install an update signed with a different key than the installed app
+     * ("App not installed as package conflicts with an existing package"). Detect that before opening the
+     * installer so the person gets a clear explanation and a browser link instead.
+     * If the certificates cannot be read the check is skipped and Android decides.
+     */
+    private fun ensureSameSigner(apk: File, release: GuardianRelease) {
+        val installed: Set<String>
+        val candidate: Set<String>
+        try {
+            val pm = app.packageManager
+            @Suppress("DEPRECATION")
+            val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+            installed = signerDigests(pm.getPackageInfo(app.packageName, flags))
+            candidate = signerDigests(pm.getPackageArchiveInfo(apk.path, flags))
+        } catch (_: Exception) {
+            return
+        }
+        if (!UpdateRules.sameSigners(installed, candidate)) {
+            apk.delete()
+            throw UpdateBlockedException(
+                UpdateRules.signatureMismatchMessage(),
+                UpdateRules.directDownloadUrl(release.tagName, release.assetName)
+            )
+        }
+    }
+
+    private fun signerDigests(info: PackageInfo?): Set<String> {
+        if (info == null) return emptySet()
+        val signatures: Array<Signature>? = if (Build.VERSION.SDK_INT >= 28) {
+            info.signingInfo?.apkContentsSigners
+        } else {
+            @Suppress("DEPRECATION", "PackageManagerGetSignatures")
+            info.signatures
+        }
+        return signatures.orEmpty().map { signature ->
+            MessageDigest.getInstance("SHA-256").digest(signature.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+        }.toSet()
+    }
+
     private fun currentVersionCode(): Int {
         @Suppress("DEPRECATION")
         return app.packageManager.getPackageInfo(app.packageName, 0).versionCode
     }
 
-    private fun requestJson(url: String, token: String): JsonObject {
+    /**
+     * Runs [block] with the saved token (if any). A stale or too-narrow token must not break updates for a
+     * public repository, so on 401/403/404 the request is repeated once without it.
+     */
+    private fun <T> withToken(block: (String?) -> T): T {
+        val token = readToken()
+        try {
+            return block(token)
+        } catch (first: HttpFailure) {
+            if (token != null && first.code in intArrayOf(401, 403, 404)) {
+                try {
+                    return block(null)
+                } catch (_: HttpFailure) {
+                    // fall through and report the first failure
+                }
+            }
+            throw IOException(UpdateRules.explainHttpFailure(first.code, token != null) + " (HTTP " + first.code + ")")
+        }
+    }
+
+    private fun requestText(url: String, token: String?): String {
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 15_000
             readTimeout = 20_000
-            setRequestProperty("Authorization", "Bearer $token")
+            if (token != null) setRequestProperty("Authorization", "Bearer $token")
             setRequestProperty("Accept", "application/vnd.github+json")
             setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
             setRequestProperty("User-Agent", "Guardian-Android-Updater")
         }
         try {
             val code = connection.responseCode
-            if (code !in 200..299) {
-                throw IOException(UpdateRules.explainHttpFailure(code) + " (HTTP " + code + ")")
-            }
-            return JsonParser.parseString(connection.inputStream.bufferedReader().use { it.readText() }).asJsonObject
+            if (code !in 200..299) throw HttpFailure(code)
+            return connection.inputStream.bufferedReader().use { it.readText() }
         } finally {
             connection.disconnect()
         }
     }
-
-    private fun JsonObject.stringValue(name: String): String =
-        try { get(name)?.takeIf { !it.isJsonNull }?.asString.orEmpty() } catch (_: Exception) { "" }
 
     private fun readToken(): String? {
         return try {

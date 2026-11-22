@@ -38,7 +38,7 @@ class ParentActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) {
             routeIntent(intent)
-            if (vm.hasToken) vm.checkUpdates(false)
+            vm.checkUpdates(false)
         }
         GuardianUpdateScheduler.schedule(applicationContext)
         askForNotifications()

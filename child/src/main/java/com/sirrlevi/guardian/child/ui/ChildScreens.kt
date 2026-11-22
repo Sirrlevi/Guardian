@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -464,6 +465,7 @@ fun ChildSettingsScreen(vm: ChildViewModel, padding: PaddingValues) {
     var showUnpair by remember { mutableStateOf(false) }
     var token by remember { mutableStateOf("") }
     var changing by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
     val result = vm.updateResult
     val release = result?.release
 
@@ -480,7 +482,8 @@ fun ChildSettingsScreen(vm: ChildViewModel, padding: PaddingValues) {
                         Text("Guardian Child", style = MaterialTheme.typography.bodySmall, color = kc.muted)
                     }
                     when {
-                        result?.updateAvailable == true -> KPill("Update ready", kc.good)
+                        result?.updateAvailable == true -> if (result.needsReinstall) KPill("Reinstall once", kc.sun) else KPill("Update ready", kc.good)
+                        result != null && release == null -> KPill("No release yet", kc.sun)
                         result != null -> KPill("Up to date", kc.good)
                     }
                 }
@@ -500,19 +503,22 @@ fun ChildSettingsScreen(vm: ChildViewModel, padding: PaddingValues) {
                     Text(release.notes.trim().take(400), style = MaterialTheme.typography.bodySmall, color = kc.text)
                 }
                 Spacer(Modifier.height(14.dp))
-                if (vm.hasToken) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KButton(if (vm.updateBusy && vm.updateProgress < 0) "Checking…" else "Check for updates", { vm.checkUpdates(true) },
-                            Modifier.weight(1f), enabled = !vm.updateBusy, soft = true)
-                        if (result?.updateAvailable == true) KButton("Download & install", { vm.downloadUpdate() }, Modifier.weight(1.2f), enabled = !vm.updateBusy)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text("Guardian also checks in the background and shows a notification when a new version is ready. Android's installer always asks you to confirm, and your data stays.",
-                        style = MaterialTheme.typography.bodySmall, color = kc.muted)
-                }
-                if (!vm.hasToken || changing) {
+                val reinstallUrl = vm.reinstallUrl
+                if (reinstallUrl != null) {
+                    KButton("Download APK in browser", { uriHandler.openUri(reinstallUrl) }, Modifier.fillMaxWidth(), enabled = !vm.updateBusy)
                     Spacer(Modifier.height(10.dp))
-                    Text(if (vm.hasToken) "Replace GitHub token" else "Add a GitHub token to enable updates", style = MaterialTheme.typography.titleSmall, color = kc.text)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    KButton(if (vm.updateBusy && vm.updateProgress < 0) "Checking…" else "Check for updates", { vm.checkUpdates(true) },
+                        Modifier.weight(1f), enabled = !vm.updateBusy, soft = true)
+                    if (result?.updateAvailable == true && reinstallUrl == null) KButton("Download & install", { vm.downloadUpdate() }, Modifier.weight(1.2f), enabled = !vm.updateBusy)
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Guardian checks in the background and shows a notification when a new version is ready. No login or token is needed. Android's installer always asks you to confirm, and your data stays.",
+                    style = MaterialTheme.typography.bodySmall, color = kc.muted)
+                if (changing) {
+                    Spacer(Modifier.height(10.dp))
+                    Text("GitHub token (only for a private repository)", style = MaterialTheme.typography.titleSmall, color = kc.text)
                     Text("A fine-grained token for Sirrlevi/Guardian with read-only Contents access. It is encrypted with the Android Keystore and stays on this phone.",
                         style = MaterialTheme.typography.bodySmall, color = kc.muted)
                     Spacer(Modifier.height(10.dp))
@@ -524,7 +530,7 @@ fun ChildSettingsScreen(vm: ChildViewModel, padding: PaddingValues) {
                     Spacer(Modifier.height(10.dp))
                     KButton("Save token & check", { vm.saveToken(token); token = ""; changing = false }, Modifier.fillMaxWidth(), enabled = token.trim().length >= 20)
                 } else {
-                    TextButton(onClick = { changing = true }) { Text("Replace token", color = kc.primary) }
+                    TextButton(onClick = { changing = true }) { Text(if (vm.hasToken) "Replace token" else "Private repository? Add a token", color = kc.primary) }
                 }
             }
         }

@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -235,6 +236,7 @@ private fun UpdatesCard(vm: ParentViewModel) {
     val release = result?.release
     var token by remember { mutableStateOf("") }
     var changing by remember { mutableStateOf(false) }
+    val uriHandler = LocalUriHandler.current
 
     GCard {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -245,7 +247,8 @@ private fun UpdatesCard(vm: ParentViewModel) {
                 Text("Guardian Parent", style = MaterialTheme.typography.bodySmall, color = gColors.muted)
             }
             when {
-                result?.updateAvailable == true -> Pill("Update ready", gColors.success, filled = false)
+                result?.updateAvailable == true -> Pill(if (result.needsReinstall) "Reinstall once" else "Update ready", if (result.needsReinstall) gColors.warning else gColors.success, filled = false)
+                result != null && release == null -> Pill("No release yet", gColors.warning)
                 result != null -> Pill("Up to date", gColors.success)
             }
         }
@@ -265,21 +268,24 @@ private fun UpdatesCard(vm: ParentViewModel) {
             Text(release.notes.trim().take(400), style = MaterialTheme.typography.bodySmall)
         }
         Spacer(Modifier.height(14.dp))
-        if (vm.hasToken) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                SoftButton(if (vm.updateBusy && vm.updateProgress < 0) "Checking…" else "Check for updates", { vm.checkUpdates(true) },
-                    Modifier.weight(1f), enabled = !vm.updateBusy)
-                if (result?.updateAvailable == true) {
-                    PrimaryButton("Download & install", { vm.downloadUpdate() }, Modifier.weight(1.2f), enabled = !vm.updateBusy)
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Text("Guardian also checks in the background and shows a notification when a new version is ready. Android's installer always asks you to confirm, and your data stays.",
-                style = MaterialTheme.typography.bodySmall, color = gColors.muted)
+        val reinstallUrl = vm.reinstallUrl
+        if (reinstallUrl != null) {
+            PrimaryButton("Download APK in browser", { uriHandler.openUri(reinstallUrl) }, Modifier.fillMaxWidth(), enabled = !vm.updateBusy)
+            Spacer(Modifier.height(10.dp))
         }
-        if (!vm.hasToken || changing) {
-            if (vm.hasToken) Spacer(Modifier.height(10.dp))
-            Text(if (vm.hasToken) "Replace GitHub token" else "Add your GitHub token to enable updates", style = MaterialTheme.typography.titleSmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            SoftButton(if (vm.updateBusy && vm.updateProgress < 0) "Checking…" else "Check for updates", { vm.checkUpdates(true) },
+                Modifier.weight(1f), enabled = !vm.updateBusy)
+            if (result?.updateAvailable == true && reinstallUrl == null) {
+                PrimaryButton("Download & install", { vm.downloadUpdate() }, Modifier.weight(1.2f), enabled = !vm.updateBusy)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Guardian checks in the background and shows a notification when a new version is ready. No login or token is needed. Android's installer always asks you to confirm, and your data stays.",
+            style = MaterialTheme.typography.bodySmall, color = gColors.muted)
+        if (changing) {
+            Spacer(Modifier.height(12.dp))
+            Text("GitHub token (only for a private repository)", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(4.dp))
             Text("Use a fine-grained token for Sirrlevi/Guardian with read-only access to Contents. It is encrypted with the Android Keystore and stored only on this phone.",
                 style = MaterialTheme.typography.bodySmall, color = gColors.muted)
@@ -297,7 +303,7 @@ private fun UpdatesCard(vm: ParentViewModel) {
             }, Modifier.fillMaxWidth(), enabled = token.trim().length >= 20)
         } else {
             Spacer(Modifier.height(4.dp))
-            TextButton(onClick = { changing = true }) { Text("Replace token") }
+            TextButton(onClick = { changing = true }) { Text(if (vm.hasToken) "Replace token" else "Private repository? Add a token") }
         }
     }
 }
