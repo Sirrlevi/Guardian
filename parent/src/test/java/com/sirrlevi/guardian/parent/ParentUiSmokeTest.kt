@@ -9,6 +9,7 @@ import androidx.compose.ui.test.printToString
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.sirrlevi.guardian.core.AppRule
 import com.sirrlevi.guardian.core.FamilyPolicy
@@ -28,7 +29,7 @@ import org.robolectric.annotation.Config
  * (bad constraints, missing data, wrong casts) fails the build instead of the user's phone.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
 class ParentUiSmokeTest {
     @get:Rule val rule = createComposeRule()
 
@@ -96,7 +97,7 @@ class ParentUiSmokeTest {
         // Apps tab -> open the per-app control sheet
         rule.runOnIdle { requested = Tab.Apps }
         rule.waitForIdle()
-        rule.onAllNodesWithText("YouTube")[0].performClick()
+        rule.onAllNodesWithText("YouTube")[0].performScrollTo().performClick()
         rule.waitForIdle()
         try {
             rule.onNodeWithText("Block this app").assertExists()

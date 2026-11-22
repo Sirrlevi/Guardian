@@ -21,7 +21,7 @@ import org.robolectric.annotation.Config
 
 /** Renders every Child screen with sample data so a crash while composing fails the build, not the phone. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
 class ChildUiSmokeTest {
     @get:Rule val rule = createComposeRule()
 
