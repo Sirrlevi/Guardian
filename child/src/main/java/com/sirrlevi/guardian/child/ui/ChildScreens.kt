@@ -171,7 +171,7 @@ fun TodayScreen(vm: ChildViewModel, padding: PaddingValues, goTab: (ChildTab) ->
         item { ScreenTimeCard(vm) }
 
         if (blocked.isNotEmpty() || limited.isNotEmpty()) {
-            item { KSection("Your rules", "Set by your parent. They change here as soon as your parent updates them.") }
+            item { KSection("Your rules", subtitle = "Set by your parent. They change here as soon as your parent updates them.") }
             if (limited.isNotEmpty()) item {
                 KCard(padding = 16.dp) {
                     limited.forEachIndexed { i, (pkg, rule) ->
@@ -334,7 +334,7 @@ fun ProtectionScreen(vm: ChildViewModel, padding: PaddingValues, actions: ChildA
                 }
             }
         }
-        item { KSection("Steps", "Android keeps these in its own screens, so each button opens the right one.") }
+        item { KSection("Steps", subtitle = "Android keeps these in its own screens, so each button opens the right one.") }
         items(items.size) { index ->
             val p = items[index]
             KCard(padding = 16.dp) {
