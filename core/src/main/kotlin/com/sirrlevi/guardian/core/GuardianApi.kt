@@ -66,9 +66,14 @@ class GuardianApi(private val apiKey: String, databaseUrl: String) {
         )
     }
 
-    fun get(path: String, session: GuardianSession): JsonElement? {
+    /** [query] is an optional raw REST query such as `orderBy="$key"&limitToLast=30` (it is URL-encoded here). */
+    fun get(path: String, session: GuardianSession, query: String = ""): JsonElement? {
+        val extra = if (query.isBlank()) "" else "&" + query.split("&").joinToString("&") { part ->
+            val eq = part.indexOf('=')
+            if (eq < 0) part else part.substring(0, eq) + "=" + url(part.substring(eq + 1))
+        }
         val result = execute(
-            Request.Builder().url("$databaseBase/${cleanPath(path)}.json?auth=${url(session.idToken)}").get().build()
+            Request.Builder().url("$databaseBase/${cleanPath(path)}.json?auth=${url(session.idToken)}$extra").get().build()
         )
         return if (result.isJsonNull) null else result
     }
