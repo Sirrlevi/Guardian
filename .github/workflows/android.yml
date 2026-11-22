@@ -57,7 +57,6 @@ jobs:
             :child:assembleDebug
 
       - name: Lint (Parent and Child)
-        continue-on-error: true
         env:
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
           FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
@@ -171,6 +170,29 @@ jobs:
             child/build/outputs/apk/release/*.apk
           if-no-files-found: warn
           retention-days: 3
+
+      - name: Publish debug build as a pre-release (testing only)
+        if: steps.signing.outputs.ready != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p debug-assets
+          cp "$(ls parent/build/outputs/apk/debug/*.apk | head -n 1)" debug-assets/Guardian-Parent-debug.apk
+          cp "$(ls child/build/outputs/apk/debug/*.apk | head -n 1)" debug-assets/Guardian-Child-debug.apk
+          tag="guardian-debug-v1.0.${{ github.run_number }}"
+          gh release create "$tag" debug-assets/*.apk \
+            --target "${{ github.sha }}" --prerelease --latest=false \
+            --title "Guardian debug build ${{ github.run_number }} (testing only)" \
+            --notes "Debug-signed test build from commit ${{ github.sha }}. NOT used by in-app updates (pre-release). Add the four signing secrets to get signed releases that update in place."
+          gh release list --limit 100 --json tagName,isPrerelease \
+            -q '.[] | select(.isPrerelease and (.tagName | startswith("guardian-debug-"))) | .tagName' \
+            | tail -n +4 | while read -r old; do gh release delete "$old" --cleanup-tag -y; done
+          {
+            echo "### Debug test build published"
+            echo "Pre-release: $tag (Guardian-Parent-debug.apk, Guardian-Child-debug.apk). In-app updates ignore it."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish latest signed APK release
         if: steps.signing.outputs.ready == 'true'
