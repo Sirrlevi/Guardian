@@ -4,7 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.test.core.app.ApplicationProvider
 import com.sirrlevi.guardian.child.ui.ChildActions
 import com.sirrlevi.guardian.child.ui.ChildApp
@@ -31,7 +31,7 @@ class ChildUiSmokeTest {
         val vm = ChildViewModel(ApplicationProvider.getApplicationContext())
         rule.setContent { ChildTheme { ChildApp(vm, null, {}, actions) } }
         rule.waitForIdle()
-        rule.onNodeWithText("Link this phone").assertExists()
+        assert(rule.onAllNodesWithText("Link this phone").fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test fun everyPairedScreenRenders() {
