@@ -5,7 +5,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.assertExists
 import androidx.test.core.app.ApplicationProvider
 import com.sirrlevi.guardian.child.ui.ChildActions
 import com.sirrlevi.guardian.child.ui.ChildApp
