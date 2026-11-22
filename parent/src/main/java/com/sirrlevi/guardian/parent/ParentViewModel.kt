@@ -68,6 +68,17 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
 
     val device: ChildDevice? get() = devices.firstOrNull { it.id == selectedDeviceId } ?: devices.firstOrNull()
 
+    /** Lets UI smoke tests render every screen with fixed sample data. Never called by the app itself. */
+    @androidx.annotation.VisibleForTesting
+    internal fun showForTest(list: List<ChildDevice>, rules: FamilyPolicy) {
+        devices = list
+        selectedDeviceId = list.firstOrNull()?.id
+        policy = rules
+        connection = Connection.Live
+        loadedOnce = true
+        phase = Phase.Ready
+    }
+
     private val iconCache = HashMap<String, String>()
     private var lastIconFetch = 0L
     private var refreshing = false

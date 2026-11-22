@@ -82,6 +82,23 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Lets UI smoke tests render the paired screens with fixed sample data. Never called by the app itself. */
+    @androidx.annotation.VisibleForTesting
+    internal fun showForTest(items: List<ChildPermissions.Item>, rules: FamilyPolicy, apps: List<Pair<String, Int>>) {
+        permissions = items
+        monitorRunning = true
+        policy = rules
+        todayApps = apps
+        todayTotalSec = apps.sumOf { it.second }
+        todayLoaded = true
+        todayUpdatedAt = System.currentTimeMillis()
+        lastSync = System.currentTimeMillis()
+        blockedDomainCount = 2
+        blockedUrlCount = 1
+        familyId = "abcdef123456"
+        phase = Phase.Paired
+    }
+
     // ------------------------------------------------------------ pairing
 
     fun pair(create: Boolean, email: String, password: String, code: String) {
