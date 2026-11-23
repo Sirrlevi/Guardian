@@ -86,6 +86,7 @@ fun TimeAdjustCard(vm: ParentViewModel, pkg: String, rule: AppRule, clock: DayCl
     }
     val up = gColors.success
     val down = gColors.danger
+    val muted = gColors.muted
 
     fun show(text: String, color: Color) {
         flashText = text
@@ -161,7 +162,7 @@ fun TimeAdjustCard(vm: ParentViewModel, pkg: String, rule: AppRule, clock: DayCl
                 {
                     rollsUp = extra < 0
                     vm.resetToday(pkg)
-                    show("Back to the normal limit of " + Durations.compact(base), gColors.muted)
+                    show("Back to the normal limit of " + Durations.compact(base), muted)
                 },
                 Modifier.fillMaxWidth(), color = gColors.muted
             )
