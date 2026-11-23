@@ -13,4 +13,7 @@ object GuardianPaths {
     fun sessions(familyId: String, deviceId: String, dayKey: String) = device(familyId, deviceId) + "/sessions/$dayKey"
     fun daily(familyId: String, deviceId: String) = device(familyId, deviceId) + "/daily"
     fun hourly(familyId: String, deviceId: String, dayKey: String) = device(familyId, deviceId) + "/hourly/$dayKey"
+    /** Notification previews captured on the child, one node per day (`yyyyMMdd`) holding records keyed by their stable id. */
+    fun comms(familyId: String, deviceId: String) = device(familyId, deviceId) + "/comms"
+    fun commsDay(familyId: String, deviceId: String, dayKey: String) = comms(familyId, deviceId) + "/" + dayKey
 }

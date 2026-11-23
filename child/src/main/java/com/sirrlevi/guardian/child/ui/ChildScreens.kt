@@ -298,7 +298,7 @@ private fun ScreenTimeCard(vm: ChildViewModel) {
 // ------------------------------------------------------------------ protection
 
 private fun emojiFor(id: String): String = when (id) {
-    "usage" -> "📊"; "overlay" -> "🪟"; "battery" -> "🔋"; "notifications" -> "🔔"; "admin" -> "🔒"; "vpn" -> "🌐"; else -> "✅"
+    "usage" -> "📊"; "overlay" -> "🪟"; "battery" -> "🔋"; "notifications" -> "🔔"; "admin" -> "🔒"; "vpn" -> "🌐"; "notifaccess" -> "💬"; else -> "✅"
 }
 
 @Composable

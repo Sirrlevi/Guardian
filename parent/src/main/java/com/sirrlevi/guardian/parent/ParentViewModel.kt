@@ -14,6 +14,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.sirrlevi.guardian.core.AppRule
+import com.sirrlevi.guardian.core.CommRecord
 import com.sirrlevi.guardian.core.DayClock
 import com.sirrlevi.guardian.core.FamilyPolicy
 import com.sirrlevi.guardian.core.GuardianApi
@@ -23,6 +24,7 @@ import com.sirrlevi.guardian.core.PolicyCodec
 import com.sirrlevi.guardian.core.Schedule
 import com.sirrlevi.guardian.core.UpdateBlockedException
 import com.sirrlevi.guardian.core.UpdateRules
+import com.sirrlevi.guardian.parent.ui.Formats
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -73,6 +75,18 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     /** Set when this phone cannot be updated in place (debug build / different signing key): browser link to the APK. */
     var reinstallUrl by mutableStateOf<String?>(null); private set
 
+    // ---- message previews (loaded on demand by the Messages screen)
+    var comms by mutableStateOf<List<CommRecord>>(emptyList()); private set
+    var commsLoading by mutableStateOf(false); private set
+    var commsError by mutableStateOf<String?>(null); private set
+    /** True after the first load for the selected phone finished (successfully or not). */
+    var commsLoaded by mutableStateOf(false); private set
+    var commsDays by mutableIntStateOf(COMMS_PAGE_DAYS); private set
+    private var commsFor: String? = null
+    /** The child's `commsAt` the loaded list corresponds to, so a newer upload (never a clock comparison) triggers a reload. */
+    private var commsMarker = -1L
+    private val commsBusy = AtomicBoolean(false)
+
     val device: ChildDevice? get() = devices.firstOrNull { it.id == selectedDeviceId } ?: devices.firstOrNull()
 
     /** Lets UI smoke tests render every screen with fixed sample data. Never called by the app itself. */
@@ -84,6 +98,17 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         connection = Connection.Live
         loadedOnce = true
         phase = Phase.Ready
+    }
+
+    /** Lets UI tests show the Messages screen with fixed previews without a network. Never called by the app itself. */
+    @androidx.annotation.VisibleForTesting
+    internal fun showCommsForTest(records: List<CommRecord>, error: String? = null, loaded: Boolean = true) {
+        commsFor = device?.id
+        commsMarker = device?.commsAt ?: 0L
+        comms = records
+        commsError = error
+        commsLoaded = loaded
+        commsLoading = false
     }
 
     private val iconCache = HashMap<String, String>()
@@ -182,9 +207,67 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     fun selectDevice(id: String) {
         if (id == selectedDeviceId) return
         selectedDeviceId = id
+        resetComms()
         stopRealtime()
         startRealtime()
         refreshAll(silent = false)
+    }
+
+    private fun resetComms() {
+        comms = emptyList(); commsLoaded = false; commsError = null; commsLoading = false
+        commsFor = null; commsMarker = -1L; commsDays = COMMS_PAGE_DAYS
+    }
+
+    /** Loads (or reloads) message previews for the selected phone; [silent] keeps the current list on screen meanwhile. */
+    fun loadComms(silent: Boolean = false) {
+        val s0 = session ?: return
+        val d = device ?: return
+        if (!commsBusy.compareAndSet(false, true)) return
+        if (commsFor != d.id) { comms = emptyList(); commsLoaded = false; commsFor = d.id }
+        if (!silent || !commsLoaded) commsLoading = true
+        val marker = d.commsAt
+        val days = Formats.lastDays(commsDays).reversed()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val s = repo.fresh(s0); session = s
+                val result = repo.fetchComms(s, d.id, days)
+                withContext(Dispatchers.Main) {
+                    if (device?.id != d.id) return@withContext
+                    val allFailed = days.isNotEmpty() && result.failedDays == days.size
+                    if (!allFailed) { comms = result.records; commsMarker = marker }
+                    commsError = when {
+                        allFailed -> "Couldn't load messages: " + friendly(result.lastError ?: IllegalStateException("network error"))
+                        result.failedDays > 0 -> "Some days could not be loaded. Pull to retry."
+                        else -> null
+                    }
+                    commsLoaded = true
+                    commsLoading = false
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    commsError = "Couldn't load messages: " + friendly(e)
+                    commsLoaded = true
+                    commsLoading = false
+                }
+            } finally {
+                commsBusy.set(false)
+            }
+        }
+    }
+
+    /** Called by the Messages screen: reloads only when the child has uploaded something newer than what is shown. */
+    fun refreshCommsIfStale() {
+        val d = device ?: return
+        if (!commsLoaded || commsFor != d.id || d.commsAt != commsMarker) loadComms(silent = true)
+    }
+
+    fun loadEarlierComms() {
+        if (commsDays >= COMMS_MAX_DAYS) return
+        commsDays = (commsDays + COMMS_PAGE_DAYS).coerceAtMost(COMMS_MAX_DAYS)
+        commsMarker = -1L
+        loadComms(silent = false)
     }
 
     fun selectDay(dayKey: String) {
@@ -345,12 +428,16 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val s = repo.fresh(s0); session = s
-                val (live, ack) = repo.fetchRealtime(s, deviceId)
+                val snapshot = repo.fetchRealtime(s, deviceId)
+                val live = snapshot?.live
+                val ack = snapshot?.ack
                 var packageChanged = false
                 withContext(Dispatchers.Main) {
                     val old = devices.firstOrNull { it.id == deviceId }?.live
                     packageChanged = old?.pkg != live?.pkg
-                    devices = devices.map { if (it.id == deviceId) it.copy(live = live, ack = ack) else it }
+                    devices = devices.map {
+                        if (it.id == deviceId) it.copy(live = live, ack = ack, commsAt = snapshot?.commsAt ?: it.commsAt) else it
+                    }
                     connection = Connection.Live
                 }
                 if (packageChanged) scheduleTodayRefresh()
@@ -598,5 +685,10 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     override fun onCleared() {
         stopRealtime()
         super.onCleared()
+    }
+
+    private companion object {
+        const val COMMS_PAGE_DAYS = 7
+        const val COMMS_MAX_DAYS = 28
     }
 }

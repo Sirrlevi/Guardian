@@ -71,6 +71,7 @@ internal object DeviceInfoCollector {
             addProperty("admin", ChildPermissions.isAdminActive(context))
             addProperty("vpn", ChildPermissions.isVpnReady(context))
             addProperty("owner", ChildPermissions.isDeviceOwner(context))
+            addProperty("notifAccess", ChildPermissions.hasNotificationAccess(context))
         })
         info.addProperty(
             "enforcement",

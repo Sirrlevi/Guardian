@@ -41,7 +41,8 @@ class ChildUiSmokeTest {
                 ChildPermissions.Item("usage", "Usage access", "See which app is open", true, true),
                 ChildPermissions.Item("overlay", "Display over other apps", "Show the time's up screen", false, true),
                 ChildPermissions.Item("notifications", "Notifications", "Keep tracking alive", true, true),
-                ChildPermissions.Item("battery", "Battery", "Run in the background", false, false)
+                ChildPermissions.Item("battery", "Battery", "Run in the background", false, false),
+                ChildPermissions.Item("notifaccess", "Message previews (optional)", "Share chat notification previews", false, false)
             ),
             FamilyPolicy(
                 appRules = mapOf(

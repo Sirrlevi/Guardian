@@ -76,6 +76,7 @@ class ChildSyncWorker(context: Context, parameters: WorkerParameters) : Coroutin
             api.put(devicePath + "/recentActivities", recentActivities, session)
             api.put(devicePath + "/apps/installed", installedApps, session)
             prefs.edit().putLong("last_sync", now).apply()
+            try { CommsUploader.flush(applicationContext) } catch (e: Exception) { Log.w("GuardianSync", "comms flush failed", e) }
             Result.success()
         } catch (e: Exception) {
             Log.w("GuardianSync", "Child sync failed", e)

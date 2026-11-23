@@ -56,7 +56,11 @@ data class DeviceInfo(
     val permBattery: Boolean,
     val permAdmin: Boolean,
     val permVpn: Boolean,
-    val permOwner: Boolean
+    val permOwner: Boolean,
+    /** Whether Android notification access (message previews) is switched on for Guardian Child. */
+    val permNotifAccess: Boolean = false,
+    /** False when the child app is too old to report notification access at all (so "off" would be a guess). */
+    val notifAccessKnown: Boolean = false
 )
 
 data class SessionRow(val pkg: String, val name: String, val start: Long, val end: Long) {
@@ -86,7 +90,9 @@ data class ChildDevice(
     val daily: List<DayTotals>,
     val visits: List<WebVisit>,
     val requests: List<MoreTimeRequest>,
-    val hasMonitor: Boolean
+    val hasMonitor: Boolean,
+    /** When the child last uploaded message previews, on the child's clock; 0 when it never has. */
+    val commsAt: Long = 0L
 ) {
     val isOnline: Boolean get() = System.currentTimeMillis() - presenceTs() < ONLINE_WINDOW_MS
     fun presenceTs(): Long = maxOf(lastSeen, info?.ts ?: 0L, live?.ts ?: 0L)
@@ -98,7 +104,14 @@ data class ChildDevice(
     }
 }
 
-enum class Tab(val label: String) { Home("Home"), Apps("Apps"), Activity("Activity"), Reports("Reports"), Settings("Settings") }
+/**
+ * Screens of the Parent app. The ones with [inBar] sit in the bottom bar; the others are reached from "More"
+ * (or from a notification) and highlight "More" while open.
+ */
+enum class Tab(val label: String, val inBar: Boolean = true) {
+    Home("Home"), Apps("Apps"), Activity("Activity"), Messages("Messages"), More("More"),
+    Reports("Reports", false), Settings("Settings", false)
+}
 
 enum class ThemeMode { System, Dark, Light }
 

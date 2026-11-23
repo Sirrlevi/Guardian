@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 /** Hand-drawn 24×24 line icons, so the app needs no icon library. */
 enum class GIcon {
     Home, Apps, Activity, Chart, Settings, Block, Timer, Globe, Battery, Wifi, Search, Close, Check,
-    Chevron, Back, Plus, Bell, Download, Shield, Refresh, Lock, Phone, Trash, Pause, Warning, Person, Moon, Play, Link
+    Chevron, Back, Plus, Bell, Download, Shield, Refresh, Lock, Phone, Trash, Pause, Warning, Person, Moon, Play, Link, Chat, Dots
 }
 
 @Composable
@@ -89,5 +89,7 @@ private fun DrawScope.drawGIcon(icon: GIcon, c: Color, u: Float, stroke: Stroke)
         GIcon.Moon -> drawArc(c, 70f, 240f, false, o(4f, 4f), Size(16f * u, 16f * u), style = stroke)
         GIcon.Play -> poly(8f, 5f, 19f, 12f, 8f, 19f, close = true)
         GIcon.Link -> { box(3f, 9f, 11f, 6f, 3f); box(10f, 9f, 11f, 6f, 3f) }
+        GIcon.Chat -> { box(3f, 4f, 18f, 12.5f, 3.5f); poly(8f, 16.5f, 8f, 20.5f, 12.5f, 16.5f) }
+        GIcon.Dots -> { dot(6f, 12f, 1.7f); dot(12f, 12f, 1.7f); dot(18f, 12f, 1.7f) }
     }
 }

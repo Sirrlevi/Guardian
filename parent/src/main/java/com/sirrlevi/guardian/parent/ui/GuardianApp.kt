@@ -5,6 +5,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,7 +28,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -46,13 +46,15 @@ private fun Tab.icon(): GIcon = when (this) {
     Tab.Home -> GIcon.Home
     Tab.Apps -> GIcon.Apps
     Tab.Activity -> GIcon.Activity
+    Tab.Messages -> GIcon.Chat
+    Tab.More -> GIcon.Dots
     Tab.Reports -> GIcon.Chart
     Tab.Settings -> GIcon.Settings
 }
 
 /**
- * The whole Parent app: sign-in, then five tabs (Home, Apps, Activity, Reports, Settings).
- * [requestedTab] lets a notification jump straight to a tab (e.g. App updates).
+ * The whole Parent app: sign-in, then five bottom tabs (Home, Apps, Activity, Messages, More). Reports and
+ * Settings open from "More". [requestedTab] lets a notification jump straight to a screen (e.g. App updates).
  */
 @Composable
 fun GuardianApp(vm: ParentViewModel, requestedTab: Tab?, onRequestedTabConsumed: () -> Unit, onInstall: (File) -> Unit) {
@@ -74,16 +76,17 @@ fun GuardianApp(vm: ParentViewModel, requestedTab: Tab?, onRequestedTabConsumed:
 
 @Composable
 private fun MainShell(vm: ParentViewModel, requestedTab: Tab?, onRequestedTabConsumed: () -> Unit) {
-    var tabIndex by rememberSaveable { mutableIntStateOf(0) }
+    var tabName by rememberSaveable { mutableStateOf(Tab.Home.name) }
     var sheetPkg by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
-    val tabs = Tab.values()
-    val tab = tabs[tabIndex.coerceIn(0, tabs.size - 1)]
+    val barTabs = Tab.values().filter { it.inBar }
+    val tab = Tab.values().firstOrNull { it.name == tabName } ?: Tab.Home
+    val go: (Tab) -> Unit = { tabName = it.name }
     val device = vm.device
 
     LaunchedEffect(requestedTab) {
         if (requestedTab != null) {
-            tabIndex = requestedTab.ordinal
+            tabName = requestedTab.name
             onRequestedTabConsumed()
         }
     }
@@ -94,22 +97,28 @@ private fun MainShell(vm: ParentViewModel, requestedTab: Tab?, onRequestedTabCon
             snackbar.showSnackbar(text)
         }
     }
-    BackHandler(enabled = tab != Tab.Home && sheetPkg == null) { tabIndex = Tab.Home.ordinal }
+    BackHandler(enabled = tab != Tab.Home && sheetPkg == null) { go(if (tab.inBar) Tab.Home else Tab.More) }
 
     val pending = device?.requests?.count { it.status == "pending" && System.currentTimeMillis() - it.ts < 24L * 3600_000L } ?: 0
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { TopBar(vm) },
+        topBar = {
+            Column {
+                TopBar(vm)
+                if (!tab.inBar) BackToMore { go(Tab.More) }
+            }
+        },
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             NavigationBar {
-                tabs.forEach { t ->
+                barTabs.forEach { t ->
+                    val selected = t == tab || (t == Tab.More && !tab.inBar)
                     NavigationBarItem(
-                        selected = t == tab,
-                        onClick = { tabIndex = t.ordinal },
+                        selected = selected,
+                        onClick = { go(t) },
                         icon = {
-                            val tint = if (t == tab) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                             if (t == Tab.Home && pending > 0) {
                                 BadgedBox(badge = { Badge { Text(pending.toString()) } }) { GIconView(t.icon(), tint) }
                             } else GIconView(t.icon(), tint)
@@ -122,9 +131,11 @@ private fun MainShell(vm: ParentViewModel, requestedTab: Tab?, onRequestedTabCon
     ) { padding ->
         Crossfade(targetState = tab, label = "tabs") { current ->
             when (current) {
-                Tab.Home -> HomeScreen(vm, padding, onOpenApp = { sheetPkg = it.pkg }, goTab = { tabIndex = it.ordinal })
+                Tab.Home -> HomeScreen(vm, padding, onOpenApp = { sheetPkg = it.pkg }, goTab = go)
                 Tab.Apps -> AppsScreen(vm, padding, onOpenApp = { sheetPkg = it.pkg })
                 Tab.Activity -> ActivityScreen(vm, padding, onOpenApp = { sheetPkg = it.pkg })
+                Tab.Messages -> CommunicationScreen(vm, padding)
+                Tab.More -> MoreScreen(vm, padding, open = go)
                 Tab.Reports -> ReportsScreen(vm, padding, onOpenApp = { sheetPkg = it.pkg })
                 Tab.Settings -> SettingsScreen(vm, padding)
             }
@@ -136,6 +147,18 @@ private fun MainShell(vm: ParentViewModel, requestedTab: Tab?, onRequestedTabCon
         AppControlSheet(vm, sheetApp, onDismiss = { sheetPkg = null })
     } else if (sheetPkg != null) {
         sheetPkg = null
+    }
+}
+
+@Composable
+private fun BackToMore(onBack: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).clickable(onClick = onBack).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        GIconView(GIcon.Back, MaterialTheme.colorScheme.primary, size = 20.dp)
+        Spacer(Modifier.width(6.dp))
+        Text("More", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
     }
 }
 

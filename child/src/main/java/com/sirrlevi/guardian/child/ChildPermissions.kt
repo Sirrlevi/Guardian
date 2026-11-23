@@ -30,6 +30,11 @@ object ChildPermissions {
         Build.VERSION.SDK_INT < 33 ||
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
+    /** True when Android lists Guardian among the apps allowed to read notification previews. */
+    fun hasNotificationAccess(context: Context): Boolean = try {
+        androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+    } catch (_: Exception) { false }
+
     fun ignoresBatteryOptimization(context: Context): Boolean = try {
         (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(context.packageName)
     } catch (_: Exception) { false }
@@ -60,7 +65,10 @@ object ChildPermissions {
         Item("admin", "Uninstall protection", "Makes Android ask for confirmation before Guardian can be removed.",
             isAdminActive(context), false),
         Item("vpn", "Website filter (VPN)", "Blocks the websites your parent chose. Android shows a visible key icon while it is on.",
-            isVpnReady(context), false)
+            isVpnReady(context), false),
+        Item("notifaccess", "Message previews (optional)",
+            "Lets Guardian share the preview text that chat notifications (WhatsApp, Instagram, SMS…) already show on this phone with your parent. It never sees whole chats, and you can turn it off here any time.",
+            hasNotificationAccess(context), false)
     )
 
     fun settingsIntent(context: Context, id: String): Intent? = when (id) {
@@ -68,6 +76,7 @@ object ChildPermissions {
         "overlay" -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + context.packageName))
         "battery" -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + context.packageName))
         "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        "notifaccess" -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
         "admin" -> Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
             .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(context, GuardianAdminReceiver::class.java))
             .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Guardian asks for confirmation before it can be removed from this device.")

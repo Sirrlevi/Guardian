@@ -9,6 +9,8 @@ import com.google.gson.Gson
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.sirrlevi.guardian.core.CommCodec
+import com.sirrlevi.guardian.core.CommRecord
 import com.sirrlevi.guardian.core.DayClock
 import com.sirrlevi.guardian.core.FamilyPolicy
 import com.sirrlevi.guardian.core.GuardianApi
@@ -68,9 +70,35 @@ class ParentRepository(context: Context) {
     }
 
     /** Light-weight read of the real-time node (current app + the child's confirmation). */
-    fun fetchRealtime(session: GuardianSession, deviceId: String): Pair<LiveState?, AckState?> {
-        val rt = api.get(GuardianPaths.realtime(session.uid, deviceId), session).obj() ?: return null to null
-        return parseLive(rt.objectOrNull("live")) to parseAck(rt.objectOrNull("ack"))
+    fun fetchRealtime(session: GuardianSession, deviceId: String): RealtimeSnapshot? {
+        val rt = api.get(GuardianPaths.realtime(session.uid, deviceId), session).obj() ?: return null
+        return RealtimeSnapshot(parseLive(rt.objectOrNull("live")), parseAck(rt.objectOrNull("ack")), rt.longOr("commsAt", 0L))
+    }
+
+    class RealtimeSnapshot(val live: LiveState?, val ack: AckState?, val commsAt: Long)
+
+    class CommsFetch(val records: List<CommRecord>, val failedDays: Int, val lastError: Exception?)
+
+    /** Message previews for the given day keys. One failing day does not hide the others. Newest first. */
+    fun fetchComms(session: GuardianSession, deviceId: String, dayKeys: List<String>): CommsFetch {
+        val out = ArrayList<CommRecord>()
+        var failed = 0
+        var last: Exception? = null
+        for (day in dayKeys) {
+            try {
+                val node = api.get(GuardianPaths.commsDay(session.uid, deviceId, day), session).obj() ?: continue
+                for ((id, value) in node.entrySet()) {
+                    val o = value.takeIf { it.isJsonObject }?.asJsonObject ?: continue
+                    CommCodec.fromJson(id, o)?.let { out.add(it) }
+                }
+            } catch (e: java.util.concurrent.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failed++
+                last = e
+            }
+        }
+        return CommsFetch(out.sortedByDescending { it.timeMs }, failed, last)
     }
 
     /** Counts failed reads so a single slow or missing node does not blank the whole screen. */
@@ -152,7 +180,8 @@ class ParentRepository(context: Context) {
             daily = daily,
             visits = if (visitsJson != null) parseVisits(visitsJson) else previous?.visits ?: emptyList(),
             requests = if (requestsJson != null) parseRequests(requestsJson) else previous?.requests ?: emptyList(),
-            hasMonitor = info != null
+            hasMonitor = info != null,
+            commsAt = rt?.longOr("commsAt", 0L) ?: previous?.commsAt ?: 0L
         )
     }
 
@@ -253,7 +282,8 @@ class ParentRepository(context: Context) {
             autoTime = if (o.has("autoTime")) o.boolOrFalse("autoTime") else true,
             appVersion = o.stringOr("appVersion"), enforcement = o.stringOr("enforcement", "limited"),
             permUsage = perm("usage"), permOverlay = perm("overlay"), permNotifications = perm("notifications"),
-            permBattery = perm("battery"), permAdmin = perm("admin"), permVpn = perm("vpn"), permOwner = perm("owner")
+            permBattery = perm("battery"), permAdmin = perm("admin"), permVpn = perm("vpn"), permOwner = perm("owner"),
+            permNotifAccess = perm("notifAccess"), notifAccessKnown = perms?.has("notifAccess") == true
         )
     }
 
