@@ -10,6 +10,9 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.test.core.app.ApplicationProvider
 import com.sirrlevi.guardian.core.AppRule
 import com.sirrlevi.guardian.core.DayClock
@@ -123,6 +126,22 @@ class ParentUiSmokeTest {
         }
     }
 
+    private fun dumpTree(): String {
+        val roots = rule.onAllNodes(isRoot())
+        return (0 until roots.fetchSemanticsNodes().size).joinToString("\n=====ROOT=====\n") { roots[it].printToString(maxDepth = 14) }
+    }
+
+    /** Runs the button's click action directly (the sheet lives in its own window, so no screen coordinates are involved). */
+    private fun tap(node: SemanticsNodeInteraction) {
+        node.performScrollTo()
+        node.performSemanticsAction(SemanticsActions.OnClick) { it.invoke() }
+        rule.waitForIdle()
+    }
+
+    private fun expect(what: String, expected: Int, actual: Int) {
+        if (expected != actual) throw AssertionError("$what: expected $expected but was $actual\n" + dumpTree())
+    }
+
     @Test fun adjustButtonsAddAndTakeAwayTimeForTodayOnly() {
         val vm = ParentViewModel(ApplicationProvider.getApplicationContext())
         vm.showForTest(listOf(device(System.currentTimeMillis())), policy())
@@ -135,27 +154,24 @@ class ParentUiSmokeTest {
         rule.waitForIdle()
         val clock = DayClock.of(System.currentTimeMillis())
         fun extra() = vm.ruleFor(yt).extraFor(clock.dayKey)
-        fun limit() = vm.ruleFor(yt).limitFor(clock.dayOfWeek, clock.dayKey)
-        assertEquals(0, extra())
-        assertEquals(3600, limit())
+        fun limit() = vm.ruleFor(yt).limitFor(clock.dayOfWeek, clock.dayKey) ?: -1
+        expect("extra at start", 0, extra())
+        expect("limit at start", 3600, limit())
 
-        rule.onNodeWithText(plusLabel(30)).performScrollTo().performClick()
-        rule.waitForIdle()
-        assertEquals(30 * 60, extra())
-        assertEquals(90 * 60, limit())
+        tap(rule.onNodeWithText(plusLabel(30)))
+        expect("extra after +30", 30 * 60, extra())
+        expect("limit after +30", 90 * 60, limit())
         assertTrue(rule.onAllNodesWithText("+30m").fetchSemanticsNodes().isNotEmpty())
 
-        rule.onNodeWithText(plusLabel(10)).performScrollTo().performClick()
-        rule.onNodeWithText(minusLabel(60)).performScrollTo().performClick()
-        rule.waitForIdle()
-        assertEquals(-20 * 60, extra())
-        assertEquals(40 * 60, limit())
-        assertEquals(3600, vm.ruleFor(yt).dailyLimitSec) // the normal limit never moves
+        tap(rule.onNodeWithText(plusLabel(10)))
+        tap(rule.onNodeWithText(minusLabel(60)))
+        expect("extra after +10 and -60", -20 * 60, extra())
+        expect("limit after +10 and -60", 40 * 60, limit())
+        expect("normal limit", 3600, vm.ruleFor(yt).dailyLimitSec) // the normal limit never moves
 
-        rule.onNodeWithText("Reset to normal limit (1h 00m)").performScrollTo().performClick()
-        rule.waitForIdle()
-        assertEquals(0, extra())
-        assertEquals(3600, limit())
+        tap(rule.onNodeWithText("Reset to normal limit (1h 00m)"))
+        expect("extra after reset", 0, extra())
+        expect("limit after reset", 3600, limit())
         assertTrue(rule.onAllNodesWithText("Reset to normal limit (1h 00m)").fetchSemanticsNodes().isEmpty())
     }
 
