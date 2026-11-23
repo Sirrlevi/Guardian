@@ -14,13 +14,21 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import com.sirrlevi.guardian.parent.ui.BrandIntro
 import com.sirrlevi.guardian.parent.ui.GuardianApp
 import com.sirrlevi.guardian.parent.ui.GuardianTheme
 import java.io.File
@@ -43,6 +51,9 @@ class ParentActivity : ComponentActivity() {
         GuardianUpdateScheduler.schedule(applicationContext)
         askForNotifications()
 
+        // The animated intro plays on a fresh launch from the home screen, not when opened from the update notification.
+        val showIntro = savedInstanceState == null && intent?.action != ACTION_OPEN_UPDATES
+
         setContent {
             val dark = when (vm.themeMode) {
                 ThemeMode.System -> isSystemInDarkTheme()
@@ -57,12 +68,18 @@ class ParentActivity : ComponentActivity() {
                 onDispose { }
             }
             GuardianTheme(vm.themeMode) {
-                GuardianApp(
-                    vm = vm,
-                    requestedTab = requestedTab,
-                    onRequestedTabConsumed = { requestedTab = null },
-                    onInstall = { file -> install(file) }
-                )
+                var introDone by rememberSaveable { mutableStateOf(!showIntro) }
+                Box(Modifier.fillMaxSize()) {
+                    GuardianApp(
+                        vm = vm,
+                        requestedTab = requestedTab,
+                        onRequestedTabConsumed = { requestedTab = null },
+                        onInstall = { file -> install(file) }
+                    )
+                    AnimatedVisibility(visible = !introDone, exit = fadeOut(tween(450))) {
+                        BrandIntro(onFinished = { introDone = true })
+                    }
+                }
             }
         }
     }

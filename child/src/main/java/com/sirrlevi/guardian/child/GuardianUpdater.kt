@@ -162,7 +162,7 @@ class GuardianUpdater(context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(app, channelId)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setSmallIcon(R.drawable.ic_stat_guardian)
             .setContentTitle("Guardian update available")
             .setContentText("Version " + release.versionCode + " is ready. Tap to download and install.")
             .setStyle(NotificationCompat.BigTextStyle().bigText("A new " + release.title + " build is ready. Tap to open Guardian → Settings → Check for updates, then download and install it. Your data and settings are kept."))

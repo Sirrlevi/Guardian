@@ -507,7 +507,7 @@ class GuardianMonitorService : Service() {
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("Guardian protection is on")
             .setContentText("Your family can see app usage and apply screen-time limits on this phone.")
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setSmallIcon(R.drawable.ic_stat_guardian)
             .setContentIntent(open)
             .setOngoing(true)
             .build()

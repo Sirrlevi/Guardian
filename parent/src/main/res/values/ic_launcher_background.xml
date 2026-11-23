@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark brand violet behind the Parent icon, also used as the launch/intro background. -->
+    <color name="ic_launcher_background">#14001F</color>
+</resources>

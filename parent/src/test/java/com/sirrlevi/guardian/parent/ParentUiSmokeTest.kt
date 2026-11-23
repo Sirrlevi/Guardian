@@ -14,9 +14,14 @@ import androidx.test.core.app.ApplicationProvider
 import com.sirrlevi.guardian.core.AppRule
 import com.sirrlevi.guardian.core.FamilyPolicy
 import com.sirrlevi.guardian.core.Schedule
+import com.sirrlevi.guardian.parent.ui.BrandIntro
 import com.sirrlevi.guardian.parent.ui.Formats
+import com.sirrlevi.guardian.parent.ui.GuardianLogo
 import com.sirrlevi.guardian.parent.ui.GuardianApp
 import com.sirrlevi.guardian.parent.ui.GuardianTheme
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -130,5 +135,28 @@ class ParentUiSmokeTest {
             rule.runOnIdle { requested = tab }
             rule.waitForIdle()
         }
+    }
+
+    @Test
+    fun brandIntroShowsNameAndSkipsOnTap() {
+        var finished = false
+        rule.setContent { GuardianTheme(ThemeMode.Dark) { BrandIntro(onFinished = { finished = true }, durationMillis = 600_000L) } }
+        rule.onNodeWithText("Guardian").assertExists()
+        rule.onNodeWithText("PARENT").assertExists()
+        assertTrue("intro must not end by itself before its timer", !finished)
+        rule.onNodeWithText("Guardian").performClick()
+        rule.waitForIdle()
+        assertTrue("tapping the intro skips it", finished)
+    }
+
+    @Test
+    fun animatedLogoComposesInDarkAndLight() {
+        rule.setContent {
+            androidx.compose.foundation.layout.Column {
+                GuardianTheme(ThemeMode.Dark) { GuardianLogo(96.dp, Modifier.size(96.dp)) }
+                GuardianTheme(ThemeMode.Light) { GuardianLogo(96.dp, Modifier.size(96.dp)) }
+            }
+        }
+        rule.waitForIdle()
     }
 }

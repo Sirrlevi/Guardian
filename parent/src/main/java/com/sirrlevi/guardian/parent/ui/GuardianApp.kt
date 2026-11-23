@@ -145,7 +145,7 @@ private fun TopBar(vm: ParentViewModel) {
         Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).statusBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        GIconView(GIcon.Shield, MaterialTheme.colorScheme.primary, size = 26.dp)
+        GuardianLogo(32.dp)
         Spacer(Modifier.width(10.dp))
         Text("Guardian", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
         val (label, color) = when (vm.connection) {

@@ -41,7 +41,7 @@ class DomainFilterVpnService : VpnService() {
             Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("Guardian protection active")
                 .setContentText("Family-approved domain filtering is running on this device.")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
+                .setSmallIcon(R.drawable.ic_stat_guardian)
                 .setOngoing(true)
                 .build()
         } else {
@@ -49,7 +49,7 @@ class DomainFilterVpnService : VpnService() {
             Notification.Builder(this)
                 .setContentTitle("Guardian protection active")
                 .setContentText("Family-approved domain filtering is running.")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
+                .setSmallIcon(R.drawable.ic_stat_guardian)
                 .setOngoing(true)
                 .build()
         }

@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Guardian" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#4F7DF3</item>
+        <item name="colorSecondary">#2BB8A8</item>
+        <item name="android:fontFamily">sans</item>
+        <!-- Android 12+ system splash: same dark violet as the animated intro, so the hand-over is seamless. -->
+        <item name="android:windowSplashScreenBackground">@color/ic_launcher_background</item>
+    </style>
+</resources>

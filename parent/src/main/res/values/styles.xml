@@ -3,5 +3,7 @@
         <item name="colorPrimary">#4F7DF3</item>
         <item name="colorSecondary">#2BB8A8</item>
         <item name="android:fontFamily">sans</item>
+        <!-- Same dark violet as the animated intro, so older Android versions do not flash white before it. -->
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
     </style>
 </resources>
