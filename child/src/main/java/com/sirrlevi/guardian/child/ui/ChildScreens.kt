@@ -192,7 +192,10 @@ fun TodayScreen(vm: ChildViewModel, padding: PaddingValues, goTab: (ChildTab) ->
                                 }
                                 Spacer(Modifier.height(6.dp))
                                 KProgress(frac, if (frac < 0.7f) kc.primary else if (frac < 0.9f) kc.sun else kc.coral)
-                                Text("Used " + Durations.compact(u) + " of " + Durations.compact(limit) + " today", style = MaterialTheme.typography.bodySmall, color = kc.muted)
+                                val adjust = rule.extraFor(clock.dayKey)
+                                Text("Used " + Durations.compact(u) + " of " + Durations.compact(limit) + " today" +
+                                    (if (adjust > 0) " (" + Durations.signed(adjust) + " extra from your parent)" else if (adjust < 0) " (" + Durations.signed(adjust) + " today)" else ""),
+                                    style = MaterialTheme.typography.bodySmall, color = kc.muted)
                             }
                         }
                     }

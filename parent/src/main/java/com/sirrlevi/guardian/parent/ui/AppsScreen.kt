@@ -110,6 +110,8 @@ fun AppsScreen(vm: ParentViewModel, padding: PaddingValues, onOpenApp: (AppInfo)
             val rule = rules[app.pkg]
             val used = device.todaySec[app.pkg] ?: 0
             val limit = rule?.limitFor(clock.dayOfWeek, clock.dayKey)
+            val baseLimit = rule?.baseLimitFor(clock.dayOfWeek)
+            val extra = rule?.extraFor(clock.dayKey) ?: 0
             val over = limit != null && used >= limit
             GCard(onClick = { onOpenApp(app) }, padding = 12.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -130,7 +132,10 @@ fun AppsScreen(vm: ParentViewModel, padding: PaddingValues, onOpenApp: (AppInfo)
                     Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (rule?.blocked == true) Pill("Blocked", gColors.danger)
                         else if (over) Pill("Limit reached", gColors.danger)
-                        else if (limit != null) Pill("Limit " + Durations.compact(limit), gColors.warning)
+                        else if (limit != null) Pill("Limit " + Durations.compact(baseLimit ?: limit), gColors.warning)
+                        if (rule?.blocked != true && limit != null && extra != 0) {
+                            Pill(Durations.signed(extra) + " today", if (extra > 0) gColors.success else gColors.danger)
+                        }
                     }
                     Spacer(Modifier.width(4.dp))
                     GIconView(GIcon.Chevron, gColors.muted, size = 18.dp)

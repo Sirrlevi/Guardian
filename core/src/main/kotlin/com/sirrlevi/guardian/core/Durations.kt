@@ -17,6 +17,13 @@ object Durations {
         }
     }
 
+    /** 1800 → "+30m", -3600 → "−1h 00m", 0 → "0m". Uses a real minus sign so it lines up with a plus. */
+    fun signed(sec: Int): String = when {
+        sec > 0 -> "+" + compact(sec)
+        sec < 0 -> "\u2212" + compact(-sec)
+        else -> "0m"
+    }
+
     /** 3725 → "1:02:05" (a stopwatch reading). */
     fun clock(totalSec: Int): String {
         val s = totalSec.coerceAtLeast(0)

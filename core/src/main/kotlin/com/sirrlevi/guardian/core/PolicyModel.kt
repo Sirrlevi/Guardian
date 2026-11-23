@@ -13,7 +13,13 @@ object PkgKey {
     fun decode(key: String): String = key.replace(',', '.')
 }
 
-/** One parent decision about one app. A limit of 0 seconds means "no daily limit". */
+/**
+ * One parent decision about one app. A limit of 0 seconds means "no daily limit".
+ *
+ * [bonusSec] (stored under that name for compatibility) is a one-off adjustment of *today's* limit
+ * that is only valid on the day named [bonusDay]: positive = extra time, negative = time taken away.
+ * It never changes the normal limit and disappears by itself the next day.
+ */
 data class AppRule(
     val blocked: Boolean = false,
     val dailyLimitSec: Int = 0,
@@ -22,17 +28,40 @@ data class AppRule(
     val bonusDay: String = "",
     val bonusSec: Int = 0
 ) {
-    val isEmpty: Boolean get() = !blocked && dailyLimitSec <= 0 && daySec.isEmpty() && bonusSec <= 0
+    val isEmpty: Boolean get() = !blocked && dailyLimitSec <= 0 && daySec.isEmpty() && bonusSec == 0
 
-    /** Allowed seconds for [dayOfWeek] on the day named [dayKey], or null when the app is unlimited. */
-    fun limitFor(dayOfWeek: Int, dayKey: String): Int? {
+    /** The normal allowed seconds on [dayOfWeek] before any one-off adjustment, or null when the app is unlimited. */
+    fun baseLimitFor(dayOfWeek: Int): Int? {
         val base = daySec[dayOfWeek] ?: dailyLimitSec.takeIf { it > 0 }
-        if (base == null || base >= UNLIMITED_SEC) return null
-        return base + if (bonusDay == dayKey) bonusSec.coerceAtLeast(0) else 0
+        return if (base == null || base >= UNLIMITED_SEC) null else base
+    }
+
+    /** Today's one-off adjustment in seconds (+ extra, − taken away). Always 0 on any other day. */
+    fun extraFor(dayKey: String): Int = if (bonusDay == dayKey) bonusSec else 0
+
+    /** Allowed seconds for [dayOfWeek] on the day named [dayKey] including the adjustment, or null when unlimited. */
+    fun limitFor(dayOfWeek: Int, dayKey: String): Int? {
+        val base = baseLimitFor(dayOfWeek) ?: return null
+        return (base + extraFor(dayKey)).coerceAtLeast(0)
+    }
+
+    /** This rule with today's adjustment replaced by [extraSec] (0 clears it). */
+    fun withExtra(dayKey: String, extraSec: Int): AppRule =
+        if (extraSec == 0) copy(bonusDay = "", bonusSec = 0) else copy(bonusDay = dayKey, bonusSec = extraSec)
+
+    /**
+     * Adds [deltaSec] (negative = take time away) to today's adjustment. The result is clamped so today's
+     * limit never goes below zero and the extra never exceeds [MAX_EXTRA_SEC]. Unlimited apps are unchanged.
+     */
+    fun adjustedBy(dayOfWeek: Int, dayKey: String, deltaSec: Int): AppRule {
+        val base = baseLimitFor(dayOfWeek) ?: return this
+        val next = (extraFor(dayKey).toLong() + deltaSec).coerceIn(-base.toLong(), MAX_EXTRA_SEC.toLong()).toInt()
+        return withExtra(dayKey, next)
     }
 
     companion object {
         const val UNLIMITED_SEC = 24 * 60 * 60
+        const val MAX_EXTRA_SEC = 12 * 60 * 60
     }
 }
 
@@ -78,7 +107,7 @@ object PolicyCodec {
                 dailyLimitSec = obj.intOr("dailySec", 0).coerceAtLeast(0),
                 daySec = daySec,
                 bonusDay = obj.stringOr("bonusDay", ""),
-                bonusSec = obj.intOr("bonusSec", 0).coerceAtLeast(0)
+                bonusSec = obj.intOr("bonusSec", 0).coerceIn(-AppRule.UNLIMITED_SEC, AppRule.UNLIMITED_SEC)
             )
         }
         // Rules published by earlier Guardian versions stay honoured.
@@ -108,7 +137,7 @@ object PolicyCodec {
         if (rule.daySec.isNotEmpty()) add("daySec", JsonObject().apply {
             rule.daySec.toSortedMap().forEach { (day, sec) -> addProperty(day.toString(), sec) }
         })
-        if (rule.bonusSec > 0 && rule.bonusDay.isNotBlank()) {
+        if (rule.bonusSec != 0 && rule.bonusDay.isNotBlank()) {
             addProperty("bonusDay", rule.bonusDay)
             addProperty("bonusSec", rule.bonusSec)
         }

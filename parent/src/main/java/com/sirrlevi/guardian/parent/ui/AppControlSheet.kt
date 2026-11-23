@@ -38,7 +38,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -72,7 +75,7 @@ fun AppControlSheet(vm: ParentViewModel, app: AppInfo, onDismiss: () -> Unit) {
         blocked = blocked,
         dailyLimitSec = if (mode == 1) dailySec else 0,
         daySec = if (mode == 2) days else emptyMap()
-    )
+    ).let { if (mode == 0) it.withExtra("", 0) else it }
     val changed = edited != rule
 
     val liveExtra = device?.live?.takeIf { it.pkg == app.pkg && !it.blocked }?.let {
@@ -117,6 +120,12 @@ fun AppControlSheet(vm: ParentViewModel, app: AppInfo, onDismiss: () -> Unit) {
                         Column(horizontalAlignment = Alignment.End) {
                             Text("Today's limit", style = MaterialTheme.typography.labelMedium, color = gColors.muted)
                             Text(Durations.compact(limitToday), style = MaterialTheme.typography.titleLarge, color = gColors.warning)
+                            val todayExtra = edited.extraFor(clock.dayKey)
+                            val todayBase = edited.baseLimitFor(clock.dayOfWeek)
+                            if (todayExtra != 0 && todayBase != null) {
+                                Text(Durations.compact(todayBase) + " " + Durations.signed(todayExtra) + " today",
+                                    style = MaterialTheme.typography.bodySmall, color = gColors.muted)
+                            }
                         }
                     }
                 }
@@ -213,19 +222,10 @@ fun AppControlSheet(vm: ParentViewModel, app: AppInfo, onDismiss: () -> Unit) {
                 }
             }
 
-            // ---- extra time
-            if (rule.dailyLimitSec > 0 || rule.daySec.isNotEmpty()) {
+            // ---- today-only adjustment (extra time / time taken away)
+            if (rule.baseLimitFor(clock.dayOfWeek) != null) {
                 Spacer(Modifier.height(14.dp))
-                GCard(padding = 14.dp) {
-                    Text("Give extra time today", style = MaterialTheme.typography.titleSmall)
-                    Text("One-off. Tomorrow the normal limit applies again.", style = MaterialTheme.typography.bodySmall, color = gColors.muted)
-                    Spacer(Modifier.height(10.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(15 to "+15 min", 30 to "+30 min", 60 to "+1 hour").forEach { (min, label) ->
-                            SoftButton(label, { vm.grantBonus(app.pkg, min * 60) }, Modifier.weight(1f))
-                        }
-                    }
-                }
+                TimeAdjustCard(vm, app.pkg, rule, clock)
             }
 
             Spacer(Modifier.height(20.dp))
@@ -292,20 +292,21 @@ fun LimitEditor(valueSec: Int, onChange: (Int) -> Unit) {
 
 @Composable
 private fun NumberBox(label: String, value: Int, modifier: Modifier, onValue: (Int) -> Unit) {
-    var text by remember { mutableStateOf(value.toString()) }
-    LaunchedEffect(value) { if ((text.toIntOrNull() ?: 0) != value) text = value.toString() }
+    var field by remember { mutableStateOf(TextFieldValue(value.toString())) }
+    LaunchedEffect(value) { if ((field.text.toIntOrNull() ?: 0) != value) field = TextFieldValue(value.toString()) }
     OutlinedTextField(
-        value = text,
+        value = field,
         onValueChange = { raw ->
-            val digits = raw.filter { it.isDigit() }.take(2)
-            text = digits
+            val digits = raw.text.filter { it.isDigit() }.take(2)
+            field = if (digits == raw.text) raw else TextFieldValue(digits, TextRange(digits.length))
             onValue(digits.toIntOrNull() ?: 0)
         },
         label = { Text(label) },
         singleLine = true,
         textStyle = MaterialTheme.typography.titleMedium.copy(textAlign = TextAlign.Center),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = modifier,
+        // Tapping a filled box selects its number, so typing "3" over "2" gives 3, not 23.
+        modifier = modifier.onFocusChanged { if (it.isFocused) field = field.copy(selection = TextRange(0, field.text.length)) },
         shape = RoundedCornerShape(14.dp)
     )
 }

@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import com.sirrlevi.guardian.core.AppRule
+import com.sirrlevi.guardian.core.DayClock
 import com.sirrlevi.guardian.core.FamilyPolicy
 import com.sirrlevi.guardian.core.Schedule
 import com.sirrlevi.guardian.parent.ui.BrandIntro
@@ -19,9 +20,12 @@ import com.sirrlevi.guardian.parent.ui.Formats
 import com.sirrlevi.guardian.parent.ui.GuardianLogo
 import com.sirrlevi.guardian.parent.ui.GuardianApp
 import com.sirrlevi.guardian.parent.ui.GuardianTheme
+import com.sirrlevi.guardian.parent.ui.minusLabel
+import com.sirrlevi.guardian.parent.ui.plusLabel
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -112,6 +116,63 @@ class ParentUiSmokeTest {
             throw AssertionError("Sheet did not open. " + e.message + "\n" + dump, e)
         }
         assertTrue(rule.onAllNodesWithText("Fine-tune (up to 12 hours)").fetchSemanticsNodes().isNotEmpty())
+        assertTrue(rule.onAllNodesWithText("Adjust today's time").fetchSemanticsNodes().isNotEmpty())
+        for (m in listOf(10, 30, 60)) {
+            assertTrue(rule.onAllNodesWithText(minusLabel(m)).fetchSemanticsNodes().isNotEmpty())
+            assertTrue(rule.onAllNodesWithText(plusLabel(m)).fetchSemanticsNodes().isNotEmpty())
+        }
+    }
+
+    @Test fun adjustButtonsAddAndTakeAwayTimeForTodayOnly() {
+        val vm = ParentViewModel(ApplicationProvider.getApplicationContext())
+        vm.showForTest(listOf(device(System.currentTimeMillis())), policy())
+        var requested by mutableStateOf<Tab?>(null)
+        rule.setContent { GuardianTheme(ThemeMode.Dark) { GuardianApp(vm, requested, { requested = null }, {}) } }
+        rule.waitForIdle()
+        rule.runOnIdle { requested = Tab.Apps }
+        rule.waitForIdle()
+        rule.onAllNodesWithText("YouTube")[0].performScrollTo().performClick()
+        rule.waitForIdle()
+        val clock = DayClock.of(System.currentTimeMillis())
+        fun extra() = vm.ruleFor(yt).extraFor(clock.dayKey)
+        fun limit() = vm.ruleFor(yt).limitFor(clock.dayOfWeek, clock.dayKey)
+        assertEquals(0, extra())
+        assertEquals(3600, limit())
+
+        rule.onNodeWithText(plusLabel(30)).performScrollTo().performClick()
+        rule.waitForIdle()
+        assertEquals(30 * 60, extra())
+        assertEquals(90 * 60, limit())
+        assertTrue(rule.onAllNodesWithText("+30m").fetchSemanticsNodes().isNotEmpty())
+
+        rule.onNodeWithText(plusLabel(10)).performScrollTo().performClick()
+        rule.onNodeWithText(minusLabel(60)).performScrollTo().performClick()
+        rule.waitForIdle()
+        assertEquals(-20 * 60, extra())
+        assertEquals(40 * 60, limit())
+        assertEquals(3600, vm.ruleFor(yt).dailyLimitSec) // the normal limit never moves
+
+        rule.onNodeWithText("Reset to normal limit (1h 00m)").performScrollTo().performClick()
+        rule.waitForIdle()
+        assertEquals(0, extra())
+        assertEquals(3600, limit())
+        assertTrue(rule.onAllNodesWithText("Reset to normal limit (1h 00m)").fetchSemanticsNodes().isEmpty())
+    }
+
+    @Test fun savingANewLimitReplacesTheOldOneAndQuickTapsAllCount() {
+        val vm = ParentViewModel(ApplicationProvider.getApplicationContext())
+        vm.showForTest(listOf(device(System.currentTimeMillis())), policy())
+        val clock = DayClock.of(System.currentTimeMillis())
+        vm.saveRule(yt, AppRule(dailyLimitSec = 2 * 3600))
+        vm.saveRule(yt, vm.ruleFor(yt).copy(dailyLimitSec = 3 * 3600))
+        assertEquals(3 * 3600, vm.ruleFor(yt).limitFor(clock.dayOfWeek, clock.dayKey)) // 3h, not 2h + 3h
+        repeat(3) { vm.adjustToday(yt, 10 * 60) }
+        assertEquals(30 * 60, vm.ruleFor(yt).extraFor(clock.dayKey)) // three fast taps, three times +10
+        assertEquals(3 * 3600 + 30 * 60, vm.ruleFor(yt).limitFor(clock.dayOfWeek, clock.dayKey))
+        vm.adjustToday(yt, -10 * 3600) // cannot go below zero
+        assertEquals(0, vm.ruleFor(yt).limitFor(clock.dayOfWeek, clock.dayKey))
+        vm.resetToday(yt)
+        assertEquals(3 * 3600, vm.ruleFor(yt).limitFor(clock.dayOfWeek, clock.dayKey))
     }
 
     @Test fun everyScreenRendersInDarkTheme() = walk(ThemeMode.Dark)

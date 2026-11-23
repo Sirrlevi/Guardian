@@ -3,6 +3,7 @@ package com.sirrlevi.guardian.parent
 import android.app.Application
 import android.content.Context
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,13 +23,16 @@ import com.sirrlevi.guardian.core.PolicyCodec
 import com.sirrlevi.guardian.core.Schedule
 import com.sirrlevi.guardian.core.UpdateBlockedException
 import com.sirrlevi.guardian.core.UpdateRules
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ParentViewModel(application: Application) : AndroidViewModel(application) {
     enum class Phase { Loading, SignedOut, Ready }
@@ -84,7 +88,18 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
 
     private val iconCache = HashMap<String, String>()
     private var lastIconFetch = 0L
-    private var refreshing = false
+    private val refreshing = AtomicBoolean(false)
+    /** A refresh was asked for while one was running: run exactly one more when it ends (never silently drop it). */
+    @Volatile private var refreshQueued = false
+
+    // ---- policy writes: applied on screen at once, sent to the server strictly in order
+    private class PolicyWrite(val update: JsonObject, val doneMessage: String)
+    private val writes = Channel<PolicyWrite>(Channel.UNLIMITED)
+    private var writer: Job? = null
+    /** Bumped whenever a local write starts or ends, so a refresh that began earlier cannot overwrite it with older data. */
+    @Volatile private var policyEpoch = 0
+    /** Saves that are still on their way to the server. */
+    var pendingWrites by mutableIntStateOf(0); private set
     private var todayJob: Job? = null
     private var pollJob: Job? = null
     @Volatile private var rtActive = false
@@ -190,9 +205,12 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshAll(silent: Boolean = true) {
         val s0 = session ?: return
-        if (refreshing) return
-        refreshing = true
+        if (!refreshing.compareAndSet(false, true)) {
+            refreshQueued = true
+            return
+        }
         if (!silent) connection = Connection.Syncing
+        val epochAtStart = policyEpoch
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val s = repo.fresh(s0); session = s
@@ -201,38 +219,65 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
                 val metas = repo.fetchDeviceList(s)
                 val previous = devices
                 val day = selectedDay
-                val loaded = metas.map { meta -> repo.fetchDevice(s, meta, day, previous.firstOrNull { it.id == meta.id }) }
+                var lastError: Exception? = null
+                val loaded = metas.mapNotNull { meta ->
+                    val before = previous.firstOrNull { it.id == meta.id }
+                    try {
+                        repo.fetchDevice(s, meta, day, before)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        // One child failing to load must not wipe the others: keep what we showed last time.
+                        lastError = e
+                        before
+                    }
+                }
+                if (metas.isNotEmpty() && loaded.isEmpty()) throw lastError ?: IllegalStateException("No data")
                 val target = loaded.firstOrNull { it.id == selectedDeviceId } ?: loaded.firstOrNull()
                 var newIcons: Map<String, ImageBitmap> = emptyMap()
                 if (target != null && System.currentTimeMillis() - lastIconFetch > 90_000L &&
                     target.apps.any { !iconCache.containsKey(it.pkg) }
                 ) {
                     lastIconFetch = System.currentTimeMillis()
-                    val fetched = repo.fetchIcons(s, target.id)
+                    val fetched = try { repo.fetchIcons(s, target.id) } catch (e: CancellationException) { throw e } catch (_: Exception) { emptyMap() }
                     if (fetched.isNotEmpty()) {
                         iconCache.putAll(fetched)
                         repo.saveIcons(iconCache)
                         newIcons = fetched.mapNotNull { (pkg, b64) -> repo.decodeIcon(b64)?.let { pkg to it } }.toMap()
                     }
                 }
+                var policyApplied = false
                 withContext(Dispatchers.Main) {
                     devices = loaded
-                    policy = parsedPolicy
+                    // If the parent saved something while this refresh was running, what it fetched is older than
+                    // what is on screen. Keep the screen's version; the follow-up refresh below confirms it.
+                    if (pendingWrites == 0 && policyEpoch == epochAtStart) {
+                        policy = parsedPolicy
+                        policyApplied = true
+                    } else {
+                        refreshQueued = true
+                    }
                     if (selectedDeviceId == null || loaded.none { it.id == selectedDeviceId }) selectedDeviceId = loaded.firstOrNull()?.id
                     newIcons.forEach { (pkg, bmp) -> icons[pkg] = bmp }
                     lastRefreshAt = System.currentTimeMillis()
                     loadedOnce = true
                     connection = if (loaded.isEmpty()) Connection.Offline else Connection.Live
                 }
-                repo.saveCache(loaded, raw)
+                if (policyApplied) repo.saveCache(loaded, raw)
                 if (loaded.isNotEmpty() && rtActive && rtThread == null) startRealtime()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     connection = Connection.Offline
                     if (!silent) message = "Couldn't refresh: " + friendly(e)
                 }
             } finally {
-                refreshing = false
+                refreshing.set(false)
+                if (refreshQueued) {
+                    refreshQueued = false
+                    refreshAll(silent = true)
+                }
             }
         }
     }
@@ -326,31 +371,42 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
 
     fun ruleFor(pkg: String): AppRule = policy.appRules[pkg] ?: AppRule()
 
+    /**
+     * Shows the new rule straight away, then sends it. Several quick saves keep their order and none is lost,
+     * and a refresh that was already running can no longer put the old rule back on screen.
+     */
     fun saveRule(pkg: String, rule: AppRule, doneMessage: String = "Saved. Waiting for the child's phone to confirm.") {
-        val s0 = session ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val s = repo.fresh(s0); session = s
-                val now = System.currentTimeMillis()
-                repo.patchPolicy(s, PolicyCodec.ruleUpdate(pkg, rule, policy, now))
-                withContext(Dispatchers.Main) {
-                    policy = policy.withRule(pkg, rule).copy(updatedAt = now)
-                    message = doneMessage
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { message = "Couldn't save: " + friendly(e) }
-            }
-        }
+        val now = System.currentTimeMillis()
+        val update = PolicyCodec.ruleUpdate(pkg, rule, policy, now)
+        policy = policy.withRule(pkg, rule).copy(updatedAt = now)
+        enqueueWrite(update, doneMessage)
     }
 
     fun setBlocked(pkg: String, blocked: Boolean) =
         saveRule(pkg, ruleFor(pkg).copy(blocked = blocked), if (blocked) "Blocked. Waiting for the child's phone to confirm." else "Unblocked. Waiting for the child's phone to confirm.")
 
+    /** Adds ([deltaSec] > 0) or takes away (< 0) time for today only. Returns the rule that is now in force. */
+    fun adjustToday(pkg: String, deltaSec: Int, doneMessage: String? = null): AppRule {
+        val clock = DayClock.of(System.currentTimeMillis())
+        val before = ruleFor(pkg)
+        val after = before.adjustedBy(clock.dayOfWeek, clock.dayKey, deltaSec)
+        if (after == before) return before
+        val total = after.limitFor(clock.dayOfWeek, clock.dayKey)
+        saveRule(pkg, after, doneMessage ?: ((if (deltaSec > 0) "+" else "\u2212") + (kotlin.math.abs(deltaSec) / 60) +
+            " min for today." + (if (total != null) " Limit is now " + com.sirrlevi.guardian.core.Durations.compact(total) + "." else "")))
+        return after
+    }
+
+    /** Removes today's extra time / reduction so the normal limit applies again. */
+    fun resetToday(pkg: String) {
+        val before = ruleFor(pkg)
+        if (before.bonusSec == 0 && before.bonusDay.isEmpty()) return
+        saveRule(pkg, before.withExtra("", 0), "Back to the normal limit.")
+    }
+
+    /** Kept for "give 15 minutes" on a request card. */
     fun grantBonus(pkg: String, seconds: Int) {
-        val today = DayClock.of(System.currentTimeMillis()).dayKey
-        val rule = ruleFor(pkg)
-        val existing = if (rule.bonusDay == today) rule.bonusSec else 0
-        saveRule(pkg, rule.copy(bonusDay = today, bonusSec = existing + seconds), "Added " + (seconds / 60) + " extra minutes for today.")
+        adjustToday(pkg, seconds, "Added " + (seconds / 60) + " extra minutes for today.")
     }
 
     fun pauseApps(minutes: Int) = patchPolicy(JsonObject().apply {
@@ -367,19 +423,41 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     }, "Schedules saved. Waiting for the child's phone to confirm.") { it.copy(schedules = schedules) }
 
     private fun patchPolicy(update: JsonObject, doneMessage: String, local: (FamilyPolicy) -> FamilyPolicy) {
-        val s0 = session ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val s = repo.fresh(s0); session = s
-                val now = System.currentTimeMillis()
-                update.addProperty("updatedAt", now)
-                repo.patchPolicy(s, update)
-                withContext(Dispatchers.Main) {
-                    policy = local(policy).copy(updatedAt = now)
-                    message = doneMessage
+        val now = System.currentTimeMillis()
+        update.addProperty("updatedAt", now)
+        policy = local(policy).copy(updatedAt = now)
+        enqueueWrite(update, doneMessage)
+    }
+
+    private fun enqueueWrite(update: JsonObject, doneMessage: String) {
+        policyEpoch++
+        pendingWrites++
+        writes.trySend(PolicyWrite(update, doneMessage))
+        if (writer?.isActive != true) {
+            writer = viewModelScope.launch(Dispatchers.IO) {
+                for (w in writes) {
+                    var failed = false
+                    try {
+                        val s0 = session
+                        if (s0 != null) {
+                            val s = repo.fresh(s0); session = s
+                            repo.patchPolicy(s, w.update)
+                        }
+                        withContext(Dispatchers.Main) { message = w.doneMessage }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        failed = true
+                        withContext(Dispatchers.Main) { message = "Couldn't save: " + friendly(e) }
+                    } finally {
+                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Main) {
+                            pendingWrites = (pendingWrites - 1).coerceAtLeast(0)
+                            policyEpoch++
+                        }
+                    }
+                    // A failed save means the screen is ahead of the server: pull the real state back.
+                    if (failed || pendingWrites == 0) refreshAll(silent = true)
                 }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { message = "Couldn't save: " + friendly(e) }
             }
         }
     }

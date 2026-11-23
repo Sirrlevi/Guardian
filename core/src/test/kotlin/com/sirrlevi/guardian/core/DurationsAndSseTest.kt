@@ -12,6 +12,13 @@ class DurationsAndSseTest {
         assertEquals("1:02:05", Durations.clock(3725))
     }
 
+    @Test fun formatsSignedDurations() {
+        assertEquals("+30m", Durations.signed(1800))
+        assertEquals("+2h 00m", Durations.signed(7200))
+        assertEquals("\u22121h 00m", Durations.signed(-3600))
+        assertEquals("0m", Durations.signed(0))
+    }
+
     @Test fun splitsAndJoinsHoursMinutesSeconds() {
         assertEquals(Triple(1, 2, 5), Durations.split(3725))
         assertEquals(3725, Durations.join(1, 2, 5))

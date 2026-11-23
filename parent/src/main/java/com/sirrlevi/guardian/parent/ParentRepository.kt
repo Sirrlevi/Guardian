@@ -73,19 +73,38 @@ class ParentRepository(context: Context) {
         return parseLive(rt.objectOrNull("live")) to parseAck(rt.objectOrNull("ack"))
     }
 
+    /** Counts failed reads so a single slow or missing node does not blank the whole screen. */
+    private class Reads {
+        var failures = 0
+        var last: Exception? = null
+        inline fun <T> tolerate(fallback: T, block: () -> T): T = try {
+            block()
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            failures++
+            last = e
+            fallback
+        }
+    }
+
     fun fetchDevice(session: GuardianSession, meta: DeviceMeta, selectedDay: String, previous: ChildDevice?): ChildDevice {
         val fid = session.uid
         val base = GuardianPaths.device(fid, meta.id)
         val today = DayClock.of(System.currentTimeMillis()).dayKey
+        val reads = Reads()
 
-        val info = parseInfo(api.get("$base/info", session).obj())
-        val rt = api.get("$base/rt", session).obj()
-        val status = api.get("$base/status", session).obj()
-        val catalogJson = api.get("$base/catalog", session).obj()
+        // Anything that fails keeps what the screen showed last time instead of failing the whole refresh.
+        val info = reads.tolerate(previous?.info) { parseInfo(api.get("$base/info", session).obj()) }
+        val rt = reads.tolerate(null as JsonObject?) { api.get("$base/rt", session).obj() }
+        val status = reads.tolerate(null as JsonObject?) { api.get("$base/status", session).obj() }
+        val failuresBeforeCatalog = reads.failures
+        val catalogJson = reads.tolerate(null as JsonObject?) { api.get("$base/catalog", session).obj() }
+        val catalogFailed = reads.failures > failuresBeforeCatalog
         val dailyJson = try {
             api.get("$base/daily", session, "orderBy=\"\$key\"&limitToLast=45").obj()
         } catch (_: Exception) { null }
-        val hourlyJson = api.get("$base/hourly/$today", session)
+        val hourlyJson = reads.tolerate(null as JsonElement?) { api.get("$base/hourly/$today", session) }
         val visitsJson = try {
             api.get("$base/browserHistory", session, "orderBy=\"\$key\"&limitToLast=120").obj()
         } catch (_: Exception) { null }
@@ -96,33 +115,43 @@ class ParentRepository(context: Context) {
         val sessions = LinkedHashMap<String, List<SessionRow>>()
         val dayKeys = linkedSetOf(today, selectedDay)
         previous?.sessions?.forEach { (k, v) -> if (k !in dayKeys) sessions[k] = v }
-        dayKeys.forEach { key -> sessions[key] = parseSessions(api.get(GuardianPaths.sessions(fid, meta.id, key), session).obj()) }
-
-        val apps = parseCatalog(catalogJson).ifEmpty {
-            parseLegacyApps(api.get("$base/apps/installed", session))
+        dayKeys.forEach { key ->
+            sessions[key] = reads.tolerate(previous?.sessions?.get(key) ?: emptyList()) {
+                parseSessions(api.get(GuardianPaths.sessions(fid, meta.id, key), session).obj())
+            }
         }
-        val daily = parseDaily(dailyJson)
+
+        val previousApps = previous?.apps ?: emptyList()
+        val apps = if (catalogFailed && previousApps.isNotEmpty()) previousApps else parseCatalog(catalogJson).ifEmpty {
+            reads.tolerate(previousApps) { parseLegacyApps(api.get("$base/apps/installed", session)) }
+        }
+        val daily = if (dailyJson != null) parseDaily(dailyJson) else previous?.daily ?: emptyList()
         val todayApps = daily.firstOrNull { it.dayKey == today }?.apps ?: emptyMap()
-        val todaySec = todayApps.ifEmpty { parseLegacyUsage(api.get("$base/usage/today", session)) }
+        val todaySec = todayApps.ifEmpty {
+            reads.tolerate(previous?.todaySec ?: emptyMap()) { parseLegacyUsage(api.get("$base/usage/today", session)) }
+        }
         val hourly = (hourlyJson as? JsonArray)?.map { it.asIntSafe() }?.let { list ->
             List(24) { list.getOrNull(it) ?: 0 }
-        } ?: List(24) { 0 }
+        } ?: previous?.hourlyToday ?: List(24) { 0 }
+
+        // Many reads failing at once means the connection (or sign-in) is really gone: report it.
+        if (reads.failures >= 4) throw reads.last ?: IllegalStateException("Could not load the child's data")
 
         return ChildDevice(
             id = meta.id,
             name = meta.name,
             manufacturer = meta.manufacturer,
-            lastSeen = status?.longOr("lastSeen", meta.lastSeen) ?: meta.lastSeen,
+            lastSeen = status?.longOr("lastSeen", meta.lastSeen) ?: previous?.lastSeen ?: meta.lastSeen,
             apps = apps,
             info = info,
-            live = parseLive(rt?.objectOrNull("live")),
-            ack = parseAck(rt?.objectOrNull("ack")),
+            live = if (rt != null) parseLive(rt.objectOrNull("live")) else previous?.live,
+            ack = if (rt != null) parseAck(rt.objectOrNull("ack")) else previous?.ack,
             todaySec = todaySec,
             hourlyToday = hourly,
             sessions = sessions,
             daily = daily,
-            visits = parseVisits(visitsJson),
-            requests = parseRequests(requestsJson),
+            visits = if (visitsJson != null) parseVisits(visitsJson) else previous?.visits ?: emptyList(),
+            requests = if (requestsJson != null) parseRequests(requestsJson) else previous?.requests ?: emptyList(),
             hasMonitor = info != null
         )
     }
