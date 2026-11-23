@@ -273,7 +273,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     fun selectDay(dayKey: String) {
         selectedDay = dayKey
         val d = device ?: return
-        if (d.sessions.containsKey(dayKey) && dayKey != DayClock.of(System.currentTimeMillis()).dayKey) return
+        if (d.sessions.containsKey(dayKey) && d.screenEvents.containsKey(dayKey) && dayKey != DayClock.of(System.currentTimeMillis()).dayKey) return
         val s0 = session ?: return
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -282,6 +282,12 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
                 withContext(Dispatchers.Main) {
                     devices = devices.map { if (it.id == d.id) it.copy(sessions = it.sessions + (dayKey to rows)) else it }
                 }
+                val screen = try { repo.fetchScreenFor(s, d.id, dayKey) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                if (screen != null) withContext(Dispatchers.Main) {
+                    devices = devices.map { if (it.id == d.id) it.copy(screenEvents = it.screenEvents + (dayKey to screen)) else it }
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) { }
         }
     }

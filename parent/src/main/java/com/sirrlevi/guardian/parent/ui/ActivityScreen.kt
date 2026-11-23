@@ -29,7 +29,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.sirrlevi.guardian.core.ActivityTimeline
 import com.sirrlevi.guardian.core.DayClock
+import com.sirrlevi.guardian.core.Session
+import com.sirrlevi.guardian.core.TimelineEvent
+import com.sirrlevi.guardian.core.TimelineKind
 import com.sirrlevi.guardian.core.DomainRules
 import com.sirrlevi.guardian.core.Durations
 import com.sirrlevi.guardian.parent.AppInfo
@@ -39,7 +43,7 @@ import com.sirrlevi.guardian.parent.SessionRow
 import com.sirrlevi.guardian.parent.WebVisit
 import java.util.Calendar
 
-/** "What did they do, and when?" – a day picker, then every app session or every site visited. */
+/** "What did they do, and when?" – a day picker, then app sessions, a timeline of app and screen events, or sites visited. */
 @Composable
 fun ActivityScreen(vm: ParentViewModel, padding: PaddingValues, onOpenApp: (AppInfo) -> Unit) {
     val device = vm.device
@@ -80,14 +84,18 @@ fun ActivityScreen(vm: ParentViewModel, padding: PaddingValues, onOpenApp: (AppI
                 }
             }
         }
-        item { Segmented(listOf("Apps", "Websites"), section, { section = it }) }
+        item { Segmented(listOf("Apps", "Timeline", "Websites"), section, { section = it }) }
 
         if (device == null) {
             item { GCard { EmptyState(GIcon.Phone, "No phone connected", "Pair your child's phone from Settings to see what they do.") } }
             return@LazyColumn
         }
 
-        if (section == 0) appsSection(vm, device, todayKey, onOpenApp) else websitesSection(vm, device)
+        when (section) {
+            0 -> appsSection(vm, device, todayKey, onOpenApp)
+            1 -> timelineSection(vm, device, onOpenApp)
+            else -> websitesSection(vm, device)
+        }
     }
 }
 
@@ -150,6 +158,110 @@ private fun androidx.compose.foundation.lazy.LazyListScope.appsSection(
                     rows.forEachIndexed { i, s -> SessionLine(vm, d, s, i > 0, onOpenApp) }
                 }
             }
+        }
+    }
+}
+
+/**
+ * One day as a list of moments: screen on, unlocked, app opened, app moved to the background, locked, screen off.
+ * It is built only from what the phone's usage log recorded, so it says which app was in front and for how long,
+ * never what happened inside it.
+ */
+private fun androidx.compose.foundation.lazy.LazyListScope.timelineSection(vm: ParentViewModel, d: ChildDevice, onOpenApp: (AppInfo) -> Unit) {
+    val day = vm.selectedDay
+    val sessions = (d.sessions[day] ?: emptyList()).map { Session(it.pkg, it.start, it.end) }
+    val screen = d.screenEvents[day] ?: emptyList()
+    val events = ActivityTimeline.build(sessions, screen)
+    val summary = ActivityTimeline.summary(sessions, screen)
+
+    item {
+        GCard(container = gColors.info.copy(alpha = 0.10f)) {
+            Row(verticalAlignment = Alignment.Top) {
+                GIconView(GIcon.Activity, gColors.info, size = 22.dp)
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text("App usage events", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "When apps were opened and moved to the background, and when the screen turned on or off. This shows which app was used and for how long, not what was done inside it or who was messaged.",
+                        style = MaterialTheme.typography.bodySmall, color = gColors.muted
+                    )
+                }
+            }
+        }
+    }
+
+    if (events.isEmpty()) {
+        item {
+            GCard {
+                EmptyState(
+                    GIcon.Activity,
+                    if (d.hasMonitor) "No activity recorded" else "Waiting for live tracking",
+                    if (d.hasMonitor) "Nothing was recorded for this day, or the phone was offline." else "Update Guardian Child on the phone and grant Usage Access to record activity."
+                )
+            }
+        }
+        return
+    }
+
+    item {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            StatTile("App time", Durations.compact(summary.totalSec), Modifier.weight(1f), sub = summary.appSessions.toString() + (if (summary.appSessions == 1) " session" else " sessions"))
+            StatTile("Apps used", summary.distinctApps.toString(), Modifier.weight(1f))
+            StatTile("Unlocks", if (screen.isEmpty()) "–" else summary.unlocks.toString(), Modifier.weight(1f), sub = if (screen.isEmpty()) "not reported" else null)
+        }
+    }
+    item {
+        Text(
+            "First activity ${Formats.timeOfDay(summary.firstMs)} · last ${Formats.timeOfDay(summary.lastMs)}" +
+                (summary.longestPkg?.let { " · longest: ${d.nameOf(it)} (${Durations.compact(summary.longestSec)})" } ?: ""),
+            style = MaterialTheme.typography.bodySmall, color = gColors.muted
+        )
+    }
+
+    val rows = events.asReversed().take(200)
+    item {
+        GCard(padding = 4.dp) {
+            rows.forEachIndexed { i, ev -> TimelineLine(vm, d, ev, i > 0, onOpenApp) }
+        }
+    }
+    if (events.size > rows.size) item { Text("Showing the latest ${rows.size} of ${events.size} events.", style = MaterialTheme.typography.bodySmall, color = gColors.muted) }
+}
+
+@Composable
+private fun TimelineLine(vm: ParentViewModel, d: ChildDevice, ev: TimelineEvent, divider: Boolean, onOpenApp: (AppInfo) -> Unit) {
+    if (divider) HorizontalDivider(color = gColors.stroke)
+    val pkg = ev.pkg
+    val app = pkg?.let { d.app(it) }
+    val (title, detail) = when (ev.kind) {
+        TimelineKind.APP_OPENED -> "Opened ${d.nameOf(pkg.orEmpty())}" to ev.durationSec?.let { "used for ${Durations.compact(it)}" }
+        TimelineKind.APP_BACKGROUND -> "${d.nameOf(pkg.orEmpty())} moved to background" to null
+        TimelineKind.SCREEN_ON -> "Screen turned on" to null
+        TimelineKind.SCREEN_OFF -> "Screen turned off" to null
+        TimelineKind.UNLOCKED -> "Phone unlocked" to null
+        TimelineKind.LOCKED -> "Phone locked" to null
+    }
+    Row(
+        Modifier.fillMaxWidth().then(if (app != null) Modifier.clickable { onOpenApp(app) } else Modifier).padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(Formats.timeOfDay(ev.timeMs), style = MaterialTheme.typography.labelMedium, color = gColors.muted, modifier = Modifier.width(64.dp))
+        if (pkg != null) {
+            AppIconView(pkg, d.nameOf(pkg), vm.icons, size = 32.dp)
+        } else {
+            val icon = when (ev.kind) {
+                TimelineKind.SCREEN_ON -> GIcon.Phone
+                TimelineKind.SCREEN_OFF -> GIcon.Moon
+                TimelineKind.UNLOCKED, TimelineKind.LOCKED -> GIcon.Lock
+                else -> GIcon.Activity
+            }
+            Box(Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                GIconView(icon, gColors.muted, size = 18.dp)
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1)
+            if (detail != null) Text(detail, style = MaterialTheme.typography.bodySmall, color = gColors.muted)
         }
     }
 }

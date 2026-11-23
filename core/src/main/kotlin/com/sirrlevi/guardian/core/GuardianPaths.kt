@@ -11,6 +11,8 @@ object GuardianPaths {
     fun catalog(familyId: String, deviceId: String) = device(familyId, deviceId) + "/catalog"
     fun icons(familyId: String, deviceId: String) = device(familyId, deviceId) + "/icons"
     fun sessions(familyId: String, deviceId: String, dayKey: String) = device(familyId, deviceId) + "/sessions/$dayKey"
+    /** Screen on/off and lock/unlock moments for one day, keyed by `<timestamp>_<kind>`. */
+    fun screen(familyId: String, deviceId: String, dayKey: String) = device(familyId, deviceId) + "/screen/$dayKey"
     fun daily(familyId: String, deviceId: String) = device(familyId, deviceId) + "/daily"
     fun hourly(familyId: String, deviceId: String, dayKey: String) = device(familyId, deviceId) + "/hourly/$dayKey"
     /** Notification previews captured on the child, one node per day (`yyyyMMdd`) holding records keyed by their stable id. */

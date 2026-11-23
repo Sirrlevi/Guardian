@@ -11,6 +11,8 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.sirrlevi.guardian.core.CommCodec
 import com.sirrlevi.guardian.core.CommRecord
+import com.sirrlevi.guardian.core.ScreenEvent
+import com.sirrlevi.guardian.core.ScreenEventCodec
 import com.sirrlevi.guardian.core.DayClock
 import com.sirrlevi.guardian.core.FamilyPolicy
 import com.sirrlevi.guardian.core.GuardianApi
@@ -55,6 +57,9 @@ class ParentRepository(context: Context) {
 
     fun fetchSessionsFor(session: GuardianSession, deviceId: String, dayKey: String): List<SessionRow> =
         parseSessions(api.get(GuardianPaths.sessions(session.uid, deviceId, dayKey), session).obj())
+
+    fun fetchScreenFor(session: GuardianSession, deviceId: String, dayKey: String): List<ScreenEvent> =
+        parseScreen(api.get(GuardianPaths.screen(session.uid, deviceId, dayKey), session).obj())
 
     class DeviceMeta(val id: String, val name: String, val manufacturer: String, val lastSeen: Long)
 
@@ -149,6 +154,18 @@ class ParentRepository(context: Context) {
             }
         }
 
+        val screenEvents = LinkedHashMap<String, List<ScreenEvent>>()
+        previous?.screenEvents?.forEach { (k, v) -> if (k !in dayKeys) screenEvents[k] = v }
+        dayKeys.forEach { key ->
+            screenEvents[key] = try {
+                parseScreen(api.get(GuardianPaths.screen(fid, meta.id, key), session).obj())
+            } catch (e: java.util.concurrent.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                previous?.screenEvents?.get(key) ?: emptyList()   // optional data: never counts as a failed refresh
+            }
+        }
+
         val previousApps = previous?.apps ?: emptyList()
         val apps = if (catalogFailed && previousApps.isNotEmpty()) previousApps else parseCatalog(catalogJson).ifEmpty {
             reads.tolerate(previousApps) { parseLegacyApps(api.get("$base/apps/installed", session)) }
@@ -181,7 +198,8 @@ class ParentRepository(context: Context) {
             visits = if (visitsJson != null) parseVisits(visitsJson) else previous?.visits ?: emptyList(),
             requests = if (requestsJson != null) parseRequests(requestsJson) else previous?.requests ?: emptyList(),
             hasMonitor = info != null,
-            commsAt = rt?.longOr("commsAt", 0L) ?: previous?.commsAt ?: 0L
+            commsAt = rt?.longOr("commsAt", 0L) ?: previous?.commsAt ?: 0L,
+            screenEvents = screenEvents
         )
     }
 
@@ -314,6 +332,10 @@ class ParentRepository(context: Context) {
         if (start <= 0L || end <= start) null else SessionRow(s.stringOr("p"), s.stringOr("n"), start, end)
     }?.sortedBy { it.start } ?: emptyList()
 
+    private fun parseScreen(o: JsonObject?): List<ScreenEvent> = o?.entrySet()?.mapNotNull { (_, value) ->
+        value.takeIf { it.isJsonObject }?.asJsonObject?.let { ScreenEventCodec.fromJson(it) }
+    }?.sortedBy { it.timeMs } ?: emptyList()
+
     private fun parseDaily(o: JsonObject?): List<DayTotals> = o?.entrySet()?.mapNotNull { (day, value) ->
         val d = value.takeIf { it.isJsonObject }?.asJsonObject ?: return@mapNotNull null
         val apps = d.objectOrNull("apps")?.entrySet()?.mapNotNull { (key, seconds) ->
@@ -334,6 +356,6 @@ class ParentRepository(context: Context) {
     }?.sortedByDescending { it.ts } ?: emptyList()
 
     private companion object {
-        const val SCHEMA = 2
+        const val SCHEMA = 3
     }
 }

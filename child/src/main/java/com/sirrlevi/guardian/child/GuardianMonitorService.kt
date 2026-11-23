@@ -31,6 +31,9 @@ import com.sirrlevi.guardian.core.FamilyPolicy
 import com.sirrlevi.guardian.core.GuardianPaths
 import com.sirrlevi.guardian.core.PkgKey
 import com.sirrlevi.guardian.core.PolicyCodec
+import com.sirrlevi.guardian.core.ScreenEvent
+import com.sirrlevi.guardian.core.ScreenEventCodec
+import com.sirrlevi.guardian.core.ScreenKind
 import com.sirrlevi.guardian.core.Session
 import com.sirrlevi.guardian.core.UsageSessionTracker
 import com.sirrlevi.guardian.core.GuardianApi
@@ -68,6 +71,7 @@ class GuardianMonitorService : Service() {
     private var dayClock = DayClock.of(System.currentTimeMillis())
     private var lastEventTs = 0L
     private var replaying = false
+    private val replayedScreen = ArrayList<Pair<String, JsonObject>>()
     private var blockedPackage: String? = null
     private var overlayKey: String? = null
     private var overlayFailed = false
@@ -165,6 +169,7 @@ class GuardianMonitorService : Service() {
 
     private fun replayToday() {
         replaying = true
+        replayedScreen.clear()
         try {
             tracker.reset(dayClock.dayStartMs)
             lastEventTs = dayClock.dayStartMs
@@ -175,6 +180,18 @@ class GuardianMonitorService : Service() {
         val batch = JsonObject()
         tracker.sessions.filter { it.durationMs >= MIN_SESSION_MS }.takeLast(400).forEach { batch.add(it.startMs.toString(), sessionJson(it)) }
         if (batch.size() > 0) outbox.putPatch("sessions/" + dayClock.dayKey, batch)
+        val screenBatch = JsonObject()
+        replayedScreen.takeLast(400).forEach { (key, json) -> screenBatch.add(key, json) }
+        replayedScreen.clear()
+        if (screenBatch.size() > 0) outbox.putPatch("screen/" + dayClock.dayKey, screenBatch)
+    }
+
+    /** Screen on/off and lock/unlock moments, as Android's usage log reports them. */
+    private fun recordScreen(kind: ScreenKind, ts: Long) {
+        val key = ts.toString() + "_" + kind.code
+        val json = ScreenEventCodec.toJson(ScreenEvent(ts, kind))
+        if (replaying) replayedScreen.add(key to json)
+        else outbox.putOrdered("screen/" + dayKeyOf(ts) + "/" + key, json)
     }
 
     private fun pollEvents(now: Long) {
@@ -186,6 +203,7 @@ class GuardianMonitorService : Service() {
             val ts = event.timeStamp
             if (ts > newest) newest = ts
             val pkg = event.packageName
+            ScreenKind.fromUsageEvent(event.eventType)?.let { recordScreen(it, ts) }
             when (event.eventType) {
                 EVENT_RESUMED -> if (pkg != null) {
                     if (pkg != blockedPackage) blockedPackage = null
@@ -361,6 +379,7 @@ class GuardianMonitorService : Service() {
             val old = DayClock.of(cal.timeInMillis).dayKey
             cloud.api.delete("$base/sessions/$old", session)
             cloud.api.delete("$base/hourly/$old", session)
+            cloud.api.delete("$base/screen/$old", session)
             cal.add(java.util.Calendar.DAY_OF_YEAR, -76)
             cloud.api.delete("$base/daily/" + DayClock.of(cal.timeInMillis).dayKey, session)
         } catch (e: Exception) {
@@ -527,7 +546,7 @@ class GuardianMonitorService : Service() {
             ordered.addLast(Item(path, value))
         }
         @Synchronized fun requeue(item: Item) {
-            if (item.patch || item.path.startsWith("sessions/") || item.path.startsWith("requests/")) ordered.addFirst(item)
+            if (item.patch || item.path.startsWith("sessions/") || item.path.startsWith("screen/") || item.path.startsWith("requests/")) ordered.addFirst(item)
             else if (!latest.containsKey(item.path)) latest[item.path] = item
         }
         @Synchronized fun isNotEmpty() = latest.isNotEmpty() || ordered.isNotEmpty()

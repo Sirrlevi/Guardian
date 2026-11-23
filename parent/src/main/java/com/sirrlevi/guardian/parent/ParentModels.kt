@@ -1,5 +1,7 @@
 package com.sirrlevi.guardian.parent
 
+import com.sirrlevi.guardian.core.ScreenEvent
+
 /** One installed app as the child reported it. */
 data class AppInfo(
     val pkg: String,
@@ -92,7 +94,9 @@ data class ChildDevice(
     val requests: List<MoreTimeRequest>,
     val hasMonitor: Boolean,
     /** When the child last uploaded message previews, on the child's clock; 0 when it never has. */
-    val commsAt: Long = 0L
+    val commsAt: Long = 0L,
+    /** Screen on/off and lock/unlock events per day key (empty for days the phone never reported). */
+    val screenEvents: Map<String, List<ScreenEvent>> = emptyMap()
 ) {
     val isOnline: Boolean get() = System.currentTimeMillis() - presenceTs() < ONLINE_WINDOW_MS
     fun presenceTs(): Long = maxOf(lastSeen, info?.ts ?: 0L, live?.ts ?: 0L)
