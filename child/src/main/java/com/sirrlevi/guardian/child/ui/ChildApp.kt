@@ -29,6 +29,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -38,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.sirrlevi.guardian.child.CaptureRuntime
 import com.sirrlevi.guardian.child.ChildViewModel
 import java.io.File
 
@@ -53,7 +55,11 @@ class ChildActions(
     val grant: (String) -> Unit,
     val openBrowser: () -> Unit,
     val startWebsiteFilter: () -> Unit,
-    val install: (File) -> Unit
+    val install: (File) -> Unit,
+    /** The child tapped Allow on a screen-sharing request: open Android's own screen-capture dialog. */
+    val startCapture: () -> Unit = {},
+    val declineCapture: () -> Unit = {},
+    val stopCapture: () -> Unit = {}
 )
 
 @Composable
@@ -95,6 +101,7 @@ private fun Shell(vm: ChildViewModel, requestedTab: ChildTab?, onRequestedTabCon
     BackHandler(enabled = tab != ChildTab.Today) { tabIndex = ChildTab.Today.ordinal }
 
     val missingRequired = vm.permissions.any { it.required && !it.granted }
+    val capture by CaptureRuntime.state.collectAsState()
 
     Scaffold(
         containerColor = kc.bg,
@@ -123,10 +130,11 @@ private fun Shell(vm: ChildViewModel, requestedTab: ChildTab?, onRequestedTabCon
             }
         }
     ) { padding ->
+        CaptureRequestDialog(capture, onAllow = actions.startCapture, onDecline = actions.declineCapture)
         Crossfade(targetState = tab, label = "child-tabs") { current ->
             when (current) {
                 ChildTab.Today -> TodayScreen(vm, padding) { tabIndex = it.ordinal }
-                ChildTab.Protection -> ProtectionScreen(vm, padding, actions)
+                ChildTab.Protection -> ProtectionScreen(vm, padding, actions, capture)
                 ChildTab.Browser -> BrowserScreen(vm, padding, actions)
                 ChildTab.Settings -> ChildSettingsScreen(vm, padding)
             }

@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sirrlevi.guardian.child.BuildConfig
 import com.sirrlevi.guardian.child.ChildViewModel
+import com.sirrlevi.guardian.core.CaptureState
 import com.sirrlevi.guardian.core.DayClock
 import com.sirrlevi.guardian.core.Durations
 import com.sirrlevi.guardian.core.Enforcement
@@ -311,7 +312,7 @@ private fun emojiFor(id: String): String = when (id) {
 }
 
 @Composable
-fun ProtectionScreen(vm: ChildViewModel, padding: PaddingValues, actions: ChildActions) {
+fun ProtectionScreen(vm: ChildViewModel, padding: PaddingValues, actions: ChildActions, capture: CaptureState = CaptureState()) {
     val items = vm.permissions
     val required = items.filter { it.required }
     val requiredDone = required.count { it.granted }
@@ -387,6 +388,7 @@ fun ProtectionScreen(vm: ChildViewModel, padding: PaddingValues, actions: ChildA
                 }
             }
         }
+        item { CaptureStatusCard(capture, onAllow = actions.startCapture, onDecline = actions.declineCapture, onStop = actions.stopCapture) }
         vm.mediaStatus?.let { m ->
             item {
                 KCard {

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
@@ -59,6 +60,18 @@ class ChildActivity : ComponentActivity() {
             vm.refreshLocal()
         }
 
+    // Android's own "start recording or casting?" dialog. Its result is only ever used once, right away, by CaptureService.
+    private val captureConsent =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val data = result.data
+            if (result.resultCode == RESULT_OK && data != null) {
+                CaptureService.start(this, result.resultCode, data)
+            } else {
+                CaptureRuntime.declined(this)
+                vm.message = "Screen sharing wasn't allowed, so nothing is shared."
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) routeIntent(intent)
@@ -81,7 +94,10 @@ class ChildActivity : ComponentActivity() {
             grant = { id -> grantPermission(id) },
             openBrowser = { startActivity(Intent(this, GuardianBrowserActivity::class.java)) },
             startWebsiteFilter = { requestVpn() },
-            install = { file -> install(file) }
+            install = { file -> install(file) },
+            startCapture = { requestCapture() },
+            declineCapture = { CaptureRuntime.declined(this) },
+            stopCapture = { CaptureRuntime.stopByChild(this) }
         )
         setContent {
             val dark = isSystemInDarkTheme()
@@ -119,6 +135,8 @@ class ChildActivity : ComponentActivity() {
 
     private fun routeIntent(intent: Intent?) {
         if (intent?.action == ACTION_OPEN_UPDATES) requestedTab = ChildTab.Settings
+        // Tapping the "your parent asked to see your screen" notification: the request dialog shows over whichever tab is open.
+        if (intent?.action == CaptureNotifications.ACTION_PROMPT) requestedTab = ChildTab.Protection
     }
 
     private fun grantPermission(id: String) {
@@ -138,6 +156,16 @@ class ChildActivity : ComponentActivity() {
             startActivity(intent)
         } catch (_: Exception) {
             try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) { }
+        }
+    }
+
+    private fun requestCapture() {
+        try {
+            val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            captureConsent.launch(manager.createScreenCaptureIntent())
+        } catch (e: Exception) {
+            CaptureRuntime.failed(this)
+            vm.message = "This phone couldn't open Android's screen-sharing dialog."
         }
     }
 

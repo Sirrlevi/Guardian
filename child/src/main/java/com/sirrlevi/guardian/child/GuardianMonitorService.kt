@@ -143,6 +143,8 @@ class GuardianMonitorService : Service() {
         loop.scheduleWithFixedDelay({ tick() }, 0L, 1000L, TimeUnit.MILLISECONDS)
         startPolicyStream()
         registerMediaObserver()
+        // Lets the parent's screen-sharing requests reach this phone while the monitor runs. Nothing is captured without the child's OK.
+        CaptureRuntime.retain(this)
         net.execute {
             refreshPolicy()
             syncCatalog(force = false)
@@ -151,6 +153,7 @@ class GuardianMonitorService : Service() {
     }
 
     override fun onDestroy() {
+        if (alive) CaptureRuntime.release()
         alive = false
         running = false
         try { streamCall?.cancel() } catch (_: Exception) { }
