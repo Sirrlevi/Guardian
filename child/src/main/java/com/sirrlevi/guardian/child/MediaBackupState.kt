@@ -52,9 +52,10 @@ internal class MediaBackupState(context: Context) {
     /** Last settings the parent chose, as seen on the last run: used to decide whether a gallery change is worth a run. */
     fun lastKnownEnabled(): Boolean = prefs.getBoolean("enabled", false)
 
-    fun status(): MediaStatusSnapshot? = try {
-        MediaStatusCodec.fromJson(JsonParser.parseString(prefs.getString("status", null) ?: return null).asJsonObject)
-    } catch (_: Exception) { null }
+    fun status(): MediaStatusSnapshot? {
+        val raw = prefs.getString("status", null) ?: return null
+        return try { MediaStatusCodec.fromJson(JsonParser.parseString(raw).asJsonObject) } catch (_: Exception) { null }
+    }
 
     /** What the Child app shows about the backup; permission is read live, the rest from the last run. */
     fun localStatus(context: Context): MediaStatusSnapshot {
