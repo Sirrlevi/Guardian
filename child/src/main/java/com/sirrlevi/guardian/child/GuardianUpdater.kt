@@ -16,6 +16,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.sirrlevi.guardian.core.ReleaseCandidate
 import com.sirrlevi.guardian.core.UpdateBlockedException
 import com.sirrlevi.guardian.core.UpdateRules
 import java.io.File
@@ -23,6 +24,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.UnknownHostException
 import java.security.KeyStore
 import java.security.MessageDigest
 import javax.crypto.Cipher
@@ -83,7 +85,21 @@ class GuardianUpdater(context: Context) {
         // Look through the release list instead of only `releases/latest`: that single release may be an
         // old or test release without this app's APK.
         val picked = try {
-            UpdateRules.pickRelease(withToken { token -> requestText("$apiBase/releases?per_page=30", token) }, expectedAsset)
+            try {
+                UpdateRules.pickRelease(withToken { token -> requestText("$apiBase/releases?per_page=30", token) }, expectedAsset)
+            } catch (e: UnknownHostException) {
+                // Some mobile DNS providers fail to resolve api.github.com while github.com still works.
+                // Fall back to GitHub's public stable-release redirect; never relax APK signer checks.
+                try {
+                    latestReleaseFallback(expectedAsset)
+                } catch (fallbackError: Exception) {
+                    throw IOException(
+                        "GitHub API DNS failed and the public release-page fallback was also unreachable. " +
+                            "Check this phone's internet, Private DNS, VPN or DNS/ad-blocking settings, then retry.",
+                        fallbackError
+                    )
+                }
+            }
         } catch (e: IllegalArgumentException) {
             throw IOException(e.message ?: "GitHub sent an unexpected answer.")
         }
@@ -118,6 +134,71 @@ class GuardianUpdater(context: Context) {
             needsReinstall = reinstall,
             reinstallUrl = if (reinstall) UpdateRules.directDownloadUrl(release.tagName, release.assetName) else ""
         )
+    }
+
+    /**
+     * Fallback for API-host DNS failures. GitHub redirects /releases/latest to the newest
+     * published non-draft, non-prerelease release. Restrict redirects to this repository's
+     * canonical release-tag URL before deriving any download URL.
+     */
+    private fun latestReleaseFallback(assetName: String): ReleaseCandidate {
+        val tag = resolveLatestReleaseTag()
+        val version = UpdateRules.versionFromTag(tag)
+            ?: throw IOException("GitHub returned a release tag without a valid version.")
+        return ReleaseCandidate(
+            tag = tag,
+            versionCode = version,
+            title = "Guardian " + tag.removePrefix("guardian-"),
+            notes = "Detected through the public GitHub Releases page because api.github.com could not be resolved.",
+            pageUrl = "https://github.com/" + UpdateRules.REPOSITORY + "/releases/tag/" + tag,
+            assetId = 0L,
+            assetName = assetName,
+            assetSize = 0L
+        )
+    }
+
+    private fun resolveLatestReleaseTag(): String {
+        var currentUrl = URL("https://github.com/" + UpdateRules.REPOSITORY + "/releases/latest")
+        repeat(5) {
+            val connection = (currentUrl.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 15_000
+                readTimeout = 20_000
+                instanceFollowRedirects = false
+                setRequestProperty("Accept", "text/html")
+                setRequestProperty("User-Agent", "Guardian-Android-Updater")
+            }
+            val code: Int
+            val location: String?
+            try {
+                code = connection.responseCode
+                location = connection.getHeaderField("Location")
+            } finally {
+                connection.disconnect()
+            }
+
+            if (code !in 300..399 || location.isNullOrBlank()) {
+                throw IOException("GitHub Releases fallback did not return a release redirect (HTTP $code).")
+            }
+
+            val nextUrl = URL(currentUrl, location)
+            if (nextUrl.protocol != "https" || !nextUrl.host.equals("github.com", ignoreCase = true)) {
+                throw IOException("GitHub redirected to an unexpected host.")
+            }
+
+            val tagMatch = Regex(
+                "^/${Regex.escape(UpdateRules.REPOSITORY)}/releases/tag/(guardian-v\\d+(?:\\.\\d+)*)$",
+                RegexOption.IGNORE_CASE
+            ).matchEntire(nextUrl.path)
+            if (tagMatch != null) return tagMatch.groupValues[1]
+
+            val expectedLatestPath = "/" + UpdateRules.REPOSITORY + "/releases/latest"
+            if (nextUrl.path != expectedLatestPath) {
+                throw IOException("GitHub redirected to an unexpected release page.")
+            }
+            currentUrl = nextUrl
+        }
+        throw IOException("GitHub did not resolve the latest Guardian release.")
     }
 
     private fun isDebugBuild(): Boolean =
@@ -175,13 +256,22 @@ class GuardianUpdater(context: Context) {
 
     @Throws(IOException::class)
     fun download(release: GuardianRelease, onProgress: (Long, Long) -> Unit = { _, _ -> }): File {
-        val output = withToken { token -> downloadWith(token, release, onProgress) }
+        // API-backed candidates have an asset ID; DNS-fallback candidates use GitHub's direct asset URL.
+        val output = if (release.assetId > 0L) {
+            withToken { token -> downloadWith(token, release, onProgress) }
+        } else {
+            downloadWith(null, release, onProgress)
+        }
         ensureSameSigner(output, release)
         return output
     }
 
     private fun downloadWith(token: String?, release: GuardianRelease, onProgress: (Long, Long) -> Unit): File {
-        val apiUrl = "$apiBase/releases/assets/" + release.assetId
+        val apiUrl = if (release.assetId > 0L) {
+            "$apiBase/releases/assets/${release.assetId}"
+        } else {
+            UpdateRules.directDownloadUrl(release.tagName, release.assetName)
+        }
         val apiConnection = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 20_000
