@@ -114,7 +114,7 @@ data class ChildDevice(
  */
 enum class Tab(val label: String, val inBar: Boolean = true) {
     Home("Home"), Apps("Apps"), Activity("Activity"), Messages("Messages"), More("More"),
-    Reports("Reports", false), Settings("Settings", false)
+    Reports("Reports", false), Settings("Settings", false), Media("Shared media", false)
 }
 
 enum class ThemeMode { System, Dark, Light }

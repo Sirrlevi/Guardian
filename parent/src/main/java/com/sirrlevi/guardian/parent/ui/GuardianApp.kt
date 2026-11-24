@@ -50,6 +50,7 @@ private fun Tab.icon(): GIcon = when (this) {
     Tab.More -> GIcon.Dots
     Tab.Reports -> GIcon.Chart
     Tab.Settings -> GIcon.Settings
+    Tab.Media -> GIcon.Photo
 }
 
 /**
@@ -138,6 +139,7 @@ private fun MainShell(vm: ParentViewModel, requestedTab: Tab?, onRequestedTabCon
                 Tab.More -> MoreScreen(vm, padding, open = go)
                 Tab.Reports -> ReportsScreen(vm, padding, onOpenApp = { sheetPkg = it.pkg })
                 Tab.Settings -> SettingsScreen(vm, padding)
+                Tab.Media -> MediaScreen(vm, padding)
             }
         }
     }

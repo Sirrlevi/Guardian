@@ -35,6 +35,31 @@ object ChildPermissions {
         androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
     } catch (_: Exception) { false }
 
+    /**
+     * How much of the gallery Android lets Guardian see. Android 14+ can share just the photos the child picked
+     * ("selected photos"), which shows up as partial access; Guardian never works around that.
+     */
+    fun mediaAccess(context: Context): com.sirrlevi.guardian.core.MediaAccess {
+        fun granted(permission: String) = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+        return when {
+            Build.VERSION.SDK_INT >= 33 -> when {
+                granted(Manifest.permission.READ_MEDIA_IMAGES) || granted(Manifest.permission.READ_MEDIA_VIDEO) -> com.sirrlevi.guardian.core.MediaAccess.FULL
+                Build.VERSION.SDK_INT >= 34 && granted(Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) -> com.sirrlevi.guardian.core.MediaAccess.PARTIAL
+                else -> com.sirrlevi.guardian.core.MediaAccess.NONE
+            }
+            granted(Manifest.permission.READ_EXTERNAL_STORAGE) -> com.sirrlevi.guardian.core.MediaAccess.FULL
+            else -> com.sirrlevi.guardian.core.MediaAccess.NONE
+        }
+    }
+
+    fun mediaPermissionsToRequest(): Array<String> = when {
+        Build.VERSION.SDK_INT >= 34 -> arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+        )
+        Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+        else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+
     fun ignoresBatteryOptimization(context: Context): Boolean = try {
         (context.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(context.packageName)
     } catch (_: Exception) { false }
@@ -68,8 +93,21 @@ object ChildPermissions {
             isVpnReady(context), false),
         Item("notifaccess", "Message previews (optional)",
             "Lets Guardian share the preview text that chat notifications (WhatsApp, Instagram, SMS…) already show on this phone with your parent. It never sees whole chats, and you can turn it off here any time.",
-            hasNotificationAccess(context), false)
+            hasNotificationAccess(context), false),
+        mediaItem(context)
     )
+
+    private fun mediaItem(context: Context): Item {
+        val access = mediaAccess(context)
+        val status = when (access) {
+            com.sirrlevi.guardian.core.MediaAccess.FULL -> " Right now: all photos and videos are visible to Guardian."
+            com.sirrlevi.guardian.core.MediaAccess.PARTIAL -> " Right now: only the photos you chose are visible to Guardian."
+            com.sirrlevi.guardian.core.MediaAccess.NONE -> ""
+        }
+        return Item("media", "Photos & videos (optional)",
+            "Only if your parent turns on photo backup: Guardian sends smaller preview copies of new photos and videos it is allowed to see to your parent. Originals stay on this phone. You decide what Android shares, and you can stop any time in Android settings.$status",
+            access != com.sirrlevi.guardian.core.MediaAccess.NONE, false)
+    }
 
     fun settingsIntent(context: Context, id: String): Intent? = when (id) {
         "usage" -> Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
@@ -77,6 +115,7 @@ object ChildPermissions {
         "battery" -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + context.packageName))
         "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
         "notifaccess" -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+        "media" -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + context.packageName))
         "admin" -> Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
             .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(context, GuardianAdminReceiver::class.java))
             .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Guardian asks for confirmation before it can be removed from this device.")

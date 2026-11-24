@@ -42,6 +42,16 @@ class ChildActivity : ComponentActivity() {
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { vm.refreshLocal() }
 
+    private val mediaPermission =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            vm.refreshLocal()
+            if (ChildPermissions.mediaAccess(this) == com.sirrlevi.guardian.core.MediaAccess.NONE) {
+                vm.message = "Photos weren't shared. You can allow them later in Android Settings → Apps → Guardian Child → Permissions."
+            } else {
+                MediaBackupScheduler.runNow(this)
+            }
+        }
+
     private val vpnConsent =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) startVpnService()
@@ -53,6 +63,7 @@ class ChildActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) routeIntent(intent)
         GuardianUpdateScheduler.schedule(this)
+        MediaBackupScheduler.schedule(this)
         if (vm.phase == ChildViewModel.Phase.Paired) vm.scheduleSync()
 
         // Keep the screen honest while it is visible: permissions and today's numbers refresh by themselves.
@@ -112,6 +123,10 @@ class ChildActivity : ComponentActivity() {
 
     private fun grantPermission(id: String) {
         if (id == "vpn") { requestVpn(); return }
+        if (id == "media" && ChildPermissions.mediaAccess(this) == com.sirrlevi.guardian.core.MediaAccess.NONE) {
+            mediaPermission.launch(ChildPermissions.mediaPermissionsToRequest())
+            return
+        }
         if (id == "notifications" && Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {

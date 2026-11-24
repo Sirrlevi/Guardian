@@ -11,6 +11,13 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.sirrlevi.guardian.core.CommCodec
 import com.sirrlevi.guardian.core.CommRecord
+import com.sirrlevi.guardian.core.MediaChunks
+import com.sirrlevi.guardian.core.MediaCodec
+import com.sirrlevi.guardian.core.MediaItem
+import com.sirrlevi.guardian.core.MediaSettings
+import com.sirrlevi.guardian.core.MediaSettingsCodec
+import com.sirrlevi.guardian.core.MediaStatusCodec
+import com.sirrlevi.guardian.core.MediaStatusSnapshot
 import com.sirrlevi.guardian.core.ScreenEvent
 import com.sirrlevi.guardian.core.ScreenEventCodec
 import com.sirrlevi.guardian.core.DayClock
@@ -60,6 +67,50 @@ class ParentRepository(context: Context) {
 
     fun fetchScreenFor(session: GuardianSession, deviceId: String, dayKey: String): List<ScreenEvent> =
         parseScreen(api.get(GuardianPaths.screen(session.uid, deviceId, dayKey), session).obj())
+
+    // ------------------------------------------------------------ shared media
+
+    fun fetchMediaSettings(session: GuardianSession, deviceId: String): MediaSettings =
+        MediaSettingsCodec.fromJson(api.get(GuardianPaths.mediaSettings(session.uid, deviceId), session).obj())
+
+    fun saveMediaSettings(session: GuardianSession, deviceId: String, settings: MediaSettings) =
+        api.put(GuardianPaths.mediaSettings(session.uid, deviceId), MediaSettingsCodec.toJson(settings), session)
+
+    fun fetchMediaStatus(session: GuardianSession, deviceId: String): MediaStatusSnapshot? =
+        MediaStatusCodec.fromJson(api.get(GuardianPaths.mediaStatus(session.uid, deviceId), session).obj())
+
+    class MediaPage(val items: List<MediaItem>, val hasMore: Boolean, val oldestKey: String?)
+
+    /** Up to [limit] items older than [beforeKey] (or the newest ones when it is null), newest first. */
+    fun fetchMediaPage(session: GuardianSession, deviceId: String, beforeKey: String?, limit: Int = 60): MediaPage {
+        val end = if (beforeKey != null) "&endAt=\"$beforeKey\"" else ""
+        val ask = if (beforeKey != null) limit + 2 else limit + 1
+        val node = api.get(GuardianPaths.mediaItems(session.uid, deviceId), session, "orderBy=\"\$key\"&limitToLast=$ask$end").obj()
+            ?: return MediaPage(emptyList(), false, null)
+        val keys = node.keySet().filter { beforeKey == null || it < beforeKey }.sorted()
+        val wanted = keys.takeLast(limit).toSet()
+        val items = node.entrySet().mapNotNull { (key, value) ->
+            if (key in wanted) value.takeIf { it.isJsonObject }?.let { MediaCodec.fromJson(key, it.asJsonObject) } else null
+        }.sortedByDescending { it.key }
+        return MediaPage(items, hasMore = keys.size > limit, oldestKey = keys.takeLast(limit).firstOrNull())
+    }
+
+    /** The stored preview copy as JPEG bytes, or null if any piece is missing (never a half picture). */
+    fun fetchMediaPreview(session: GuardianSession, deviceId: String, item: MediaItem): ByteArray? {
+        val node = api.get(GuardianPaths.mediaBlob(session.uid, deviceId, item.key), session).obj() ?: return null
+        val pieces = node.entrySet().mapNotNull { (k, v) -> v.takeIf { it.isJsonPrimitive }?.let { k to it.asString } }.toMap()
+        val base64 = MediaChunks.join(pieces, item.chunks) ?: return null
+        return try { android.util.Base64.decode(base64, android.util.Base64.DEFAULT) } catch (_: IllegalArgumentException) { null }
+    }
+
+    /** Deletes the preview copy and tells the child never to back that file up again. The original stays on the phone. */
+    fun deleteMedia(session: GuardianSession, deviceId: String, key: String) {
+        // Tombstone first: if it fails nothing is removed and the parent sees the error; if a later step fails the
+        // phone still knows never to back this file up again.
+        api.put(GuardianPaths.mediaDeleted(session.uid, deviceId) + "/" + key, com.google.gson.JsonPrimitive(System.currentTimeMillis()), session)
+        api.delete(GuardianPaths.mediaBlob(session.uid, deviceId, key), session)
+        api.delete(GuardianPaths.mediaItem(session.uid, deviceId, key), session)
+    }
 
     class DeviceMeta(val id: String, val name: String, val manufacturer: String, val lastSeen: Long)
 

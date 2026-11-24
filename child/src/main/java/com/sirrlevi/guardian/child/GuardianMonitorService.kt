@@ -85,6 +85,29 @@ class GuardianMonitorService : Service() {
     private var lastAckedPolicy = -1L
     private val labels = java.util.concurrent.ConcurrentHashMap<String, String>()
 
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var mediaObserver: android.database.ContentObserver? = null
+    private val mediaRun = Runnable { MediaBackupScheduler.runNow(applicationContext) }
+
+    /** Notices new photos and videos so the parent gets them within minutes, but only while backup is switched on. */
+    private fun registerMediaObserver() {
+        if (mediaObserver != null) return
+        val observer = object : android.database.ContentObserver(mainHandler) {
+            override fun onChange(selfChange: Boolean) {
+                if (!MediaBackupState(applicationContext).lastKnownEnabled()) return
+                mainHandler.removeCallbacks(mediaRun)
+                mainHandler.postDelayed(mediaRun, 20_000L)
+            }
+        }
+        try {
+            contentResolver.registerContentObserver(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true, observer)
+            contentResolver.registerContentObserver(android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true, observer)
+            mediaObserver = observer
+        } catch (e: Exception) {
+            Log.w(TAG, "media observer not registered", e)
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -119,6 +142,7 @@ class GuardianMonitorService : Service() {
         )
         loop.scheduleWithFixedDelay({ tick() }, 0L, 1000L, TimeUnit.MILLISECONDS)
         startPolicyStream()
+        registerMediaObserver()
         net.execute {
             refreshPolicy()
             syncCatalog(force = false)
@@ -131,6 +155,9 @@ class GuardianMonitorService : Service() {
         running = false
         try { streamCall?.cancel() } catch (_: Exception) { }
         try { unregisterReceiver(packageReceiver) } catch (_: Exception) { }
+        mediaObserver?.let { try { contentResolver.unregisterContentObserver(it) } catch (_: Exception) { } }
+        mediaObserver = null
+        mainHandler.removeCallbacks(mediaRun)
         loop.shutdownNow()
         net.shutdown()
         main.post { if (::overlay.isInitialized) overlay.hide() }

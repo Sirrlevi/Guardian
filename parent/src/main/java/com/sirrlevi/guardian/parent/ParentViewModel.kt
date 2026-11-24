@@ -15,6 +15,9 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.sirrlevi.guardian.core.AppRule
 import com.sirrlevi.guardian.core.CommRecord
+import com.sirrlevi.guardian.core.MediaItem
+import com.sirrlevi.guardian.core.MediaSettings
+import com.sirrlevi.guardian.core.MediaStatusSnapshot
 import com.sirrlevi.guardian.core.DayClock
 import com.sirrlevi.guardian.core.FamilyPolicy
 import com.sirrlevi.guardian.core.GuardianApi
@@ -86,6 +89,22 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     /** The child's `commsAt` the loaded list corresponds to, so a newer upload (never a clock comparison) triggers a reload. */
     private var commsMarker = -1L
     private val commsBusy = AtomicBoolean(false)
+
+    // ---- shared media (preview copies of the child's new photos and videos)
+    var mediaItems by mutableStateOf<List<MediaItem>>(emptyList()); private set
+    var mediaSettings by mutableStateOf(MediaSettings()); private set
+    var mediaStatus by mutableStateOf<MediaStatusSnapshot?>(null); private set
+    var mediaLoading by mutableStateOf(false); private set
+    var mediaLoaded by mutableStateOf(false); private set
+    var mediaError by mutableStateOf<String?>(null); private set
+    var mediaHasMore by mutableStateOf(false); private set
+    var mediaSaving by mutableStateOf(false); private set
+    private var mediaCursor: String? = null
+    private var mediaFor: String? = null
+    private val mediaBusy = AtomicBoolean(false)
+    private val previewCache = object : LinkedHashMap<String, ByteArray>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?) = size > 6
+    }
 
     val device: ChildDevice? get() = devices.firstOrNull { it.id == selectedDeviceId } ?: devices.firstOrNull()
 
@@ -208,9 +227,149 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         if (id == selectedDeviceId) return
         selectedDeviceId = id
         resetComms()
+        resetMedia()
         stopRealtime()
         startRealtime()
         refreshAll(silent = false)
+    }
+
+    private fun resetMedia() {
+        mediaItems = emptyList(); mediaStatus = null; mediaSettings = MediaSettings(); mediaLoaded = false; mediaLoading = false
+        mediaError = null; mediaHasMore = false; mediaCursor = null; mediaFor = null
+        synchronized(previewCache) { previewCache.clear() }
+    }
+
+    /** Loads settings, child-reported status and the newest page of previews for the selected phone. */
+    fun loadMedia() {
+        val s0 = session ?: return
+        val d = device ?: return
+        if (!mediaBusy.compareAndSet(false, true)) return
+        if (mediaFor != d.id) resetMedia()
+        mediaFor = d.id
+        mediaLoading = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val s = repo.fresh(s0); session = s
+                val settings = repo.fetchMediaSettings(s, d.id)
+                val status = try { repo.fetchMediaStatus(s, d.id) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                val page = repo.fetchMediaPage(s, d.id, null)
+                withContext(Dispatchers.Main) {
+                    if (device?.id != d.id) return@withContext
+                    mediaSettings = settings; mediaStatus = status
+                    mediaItems = page.items; mediaHasMore = page.hasMore; mediaCursor = page.oldestKey
+                    mediaError = null; mediaLoaded = true; mediaLoading = false
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { mediaError = "Couldn't load photos: " + friendly(e); mediaLoaded = true; mediaLoading = false }
+            } finally {
+                mediaBusy.set(false)
+            }
+        }
+    }
+
+    fun loadMoreMedia() {
+        val s0 = session ?: return
+        val d = device ?: return
+        val cursor = mediaCursor ?: return
+        if (!mediaHasMore || !mediaBusy.compareAndSet(false, true)) return
+        mediaLoading = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val s = repo.fresh(s0); session = s
+                val page = repo.fetchMediaPage(s, d.id, cursor)
+                withContext(Dispatchers.Main) {
+                    if (device?.id != d.id) return@withContext
+                    val known = mediaItems.mapTo(HashSet()) { it.key }
+                    mediaItems = mediaItems + page.items.filter { it.key !in known }
+                    mediaHasMore = page.hasMore; mediaCursor = page.oldestKey ?: cursor
+                    mediaError = null; mediaLoading = false
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { mediaError = "Couldn't load more: " + friendly(e); mediaLoading = false }
+            } finally {
+                mediaBusy.set(false)
+            }
+        }
+    }
+
+    /**
+     * Applies a settings change at once and saves it; if saving fails the screen goes back to what is really stored.
+     * Switching backup on stamps the moment, so only media added from then on is ever considered.
+     */
+    fun updateMediaSettings(change: (MediaSettings) -> MediaSettings) {
+        val s0 = session ?: return
+        val d = device ?: return
+        val before = mediaSettings
+        val now = System.currentTimeMillis()
+        var next = change(before).copy(updatedAt = now)
+        if (next.enabled && !before.enabled) next = next.copy(enabledAt = now)
+        mediaSettings = next
+        mediaSaving = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val s = repo.fresh(s0); session = s
+                repo.saveMediaSettings(s, d.id, next)
+                withContext(Dispatchers.Main) { mediaSaving = false; mediaError = null }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    if (mediaSettings == next) mediaSettings = before
+                    mediaSaving = false
+                    mediaError = "Couldn't save that setting: " + friendly(e)
+                }
+            }
+        }
+    }
+
+    /** The stored preview copy for the full-screen viewer (cached for a few items), or null if it can't be loaded. */
+    suspend fun loadMediaPreview(item: MediaItem): ByteArray? {
+        synchronized(previewCache) { previewCache[item.key] }?.let { return it }
+        val s0 = session ?: return null
+        val id = device?.id ?: return null
+        return withContext(Dispatchers.IO) {
+            try {
+                val s = repo.fresh(s0); session = s
+                repo.fetchMediaPreview(s, id, item)?.also { synchronized(previewCache) { previewCache[item.key] = it } }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) { null }
+        }
+    }
+
+    fun deleteMedia(item: MediaItem, onDone: (Boolean) -> Unit = {}) {
+        val s0 = session ?: return onDone(false)
+        val d = device ?: return onDone(false)
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = try {
+                val s = repo.fresh(s0); session = s
+                repo.deleteMedia(s, d.id, item.key)
+                true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { mediaError = "Couldn't delete: " + friendly(e) }
+                false
+            }
+            withContext(Dispatchers.Main) {
+                if (ok) {
+                    mediaItems = mediaItems.filter { it.key != item.key }
+                    synchronized(previewCache) { previewCache.remove(item.key) }
+                }
+                onDone(ok)
+            }
+        }
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun showMediaForTest(items: List<MediaItem>, settings: MediaSettings = MediaSettings(), status: MediaStatusSnapshot? = null, hasMore: Boolean = false, error: String? = null) {
+        mediaFor = device?.id
+        mediaItems = items; mediaSettings = settings; mediaStatus = status; mediaHasMore = hasMore
+        mediaError = error; mediaLoaded = true; mediaLoading = false
     }
 
     private fun resetComms() {

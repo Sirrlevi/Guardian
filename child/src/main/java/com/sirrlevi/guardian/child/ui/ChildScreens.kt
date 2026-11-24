@@ -298,7 +298,7 @@ private fun ScreenTimeCard(vm: ChildViewModel) {
 // ------------------------------------------------------------------ protection
 
 private fun emojiFor(id: String): String = when (id) {
-    "usage" -> "📊"; "overlay" -> "🪟"; "battery" -> "🔋"; "notifications" -> "🔔"; "admin" -> "🔒"; "vpn" -> "🌐"; "notifaccess" -> "💬"; else -> "✅"
+    "usage" -> "📊"; "overlay" -> "🪟"; "battery" -> "🔋"; "notifications" -> "🔔"; "admin" -> "🔒"; "vpn" -> "🌐"; "notifaccess" -> "💬"; "media" -> "🖼️"; else -> "✅"
 }
 
 @Composable
@@ -349,7 +349,7 @@ fun ProtectionScreen(vm: ChildViewModel, padding: PaddingValues, actions: ChildA
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(p.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall, color = kc.text)
                             Spacer(Modifier.width(8.dp))
-                            if (p.granted) KPill("On", kc.good) else KPill(if (p.required) "Required" else "Recommended", if (p.required) kc.coral else kc.sun)
+                            if (p.granted) KPill("On", kc.good) else KPill(if (p.required) "Required" else if (p.id == "notifaccess" || p.id == "media") "Optional" else "Recommended", if (p.required) kc.coral else kc.sun)
                         }
                         Text(p.why, style = MaterialTheme.typography.bodySmall, color = kc.muted)
                     }
@@ -375,6 +375,38 @@ fun ProtectionScreen(vm: ChildViewModel, padding: PaddingValues, actions: ChildA
                 if (!vm.isDeviceOwner) {
                     Spacer(Modifier.height(12.dp))
                     KButton("How does this work?", { showOwnerInfo = true }, Modifier.fillMaxWidth(), soft = true, color = kc.purple)
+                }
+            }
+        }
+        vm.mediaStatus?.let { m ->
+            item {
+                KCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        KEmoji("🖼️", bg = kc.sky.copy(alpha = 0.16f))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Photo & video backup", style = MaterialTheme.typography.titleSmall, color = kc.text)
+                            Text(
+                                when {
+                                    !m.enabled -> "Your parent hasn't turned this on, so nothing is being sent."
+                                    m.access == com.sirrlevi.guardian.core.MediaAccess.NONE -> "Your parent turned this on, but no photos are shared with Guardian yet."
+                                    m.waiting == "wifi" -> "Waiting for Wi-Fi, as your parent chose."
+                                    m.waiting == "offline" -> "No connection right now. Guardian will try again."
+                                    else -> "${m.uploaded} sent, ${m.pending} waiting" + (if (m.failed > 0) ", ${m.failed} couldn't be backed up" else "") + "."
+                                },
+                                style = MaterialTheme.typography.bodySmall, color = kc.muted
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Only new photos and videos that Android shares with Guardian are copied, as smaller previews. Originals never leave this phone.",
+                        style = MaterialTheme.typography.bodySmall, color = kc.muted
+                    )
+                    if (m.enabled && m.access != com.sirrlevi.guardian.core.MediaAccess.NONE) {
+                        Spacer(Modifier.height(12.dp))
+                        KButton("Back up now", { vm.backUpMediaNow() }, Modifier.fillMaxWidth(), soft = true)
+                    }
                 }
             }
         }

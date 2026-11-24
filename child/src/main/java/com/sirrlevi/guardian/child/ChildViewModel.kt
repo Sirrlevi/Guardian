@@ -50,6 +50,7 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- protection (all read locally)
     var permissions by mutableStateOf<List<ChildPermissions.Item>>(emptyList()); private set
+    var mediaStatus by mutableStateOf<com.sirrlevi.guardian.core.MediaStatusSnapshot?>(null); private set
     var monitorRunning by mutableStateOf(false); private set
     var canEnforce by mutableStateOf(false); private set
     var isDeviceOwner by mutableStateOf(false); private set
@@ -196,6 +197,11 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun backUpMediaNow() {
+        MediaBackupScheduler.runNow(app)
+        message = "Photo backup requested. It runs in a moment if your parent turned it on."
+    }
+
     fun scheduleSync() {
         val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
         val periodic = PeriodicWorkRequestBuilder<ChildSyncWorker>(15, TimeUnit.MINUTES).setConstraints(constraints).build()
@@ -213,6 +219,7 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshLocal() {
         permissions = ChildPermissions.items(app)
+        mediaStatus = MediaBackupState(app).localStatus(app)
         monitorRunning = GuardianMonitorService.running
         canEnforce = ChildPermissions.canEnforce(app)
         isDeviceOwner = ChildPermissions.isDeviceOwner(app)
