@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import com.sirrlevi.guardian.core.AppCategories
 import com.sirrlevi.guardian.core.Durations
+import com.sirrlevi.guardian.core.MediaAccess
 import com.sirrlevi.guardian.parent.AppInfo
 import com.sirrlevi.guardian.parent.ChildDevice
 import com.sirrlevi.guardian.parent.ParentViewModel
@@ -66,6 +68,7 @@ fun todayTotal(d: ChildDevice): Int = maxOf(d.todaySec.values.sum(), d.live?.tot
 fun HomeScreen(vm: ParentViewModel, padding: PaddingValues, onOpenApp: (AppInfo) -> Unit, goTab: (Tab) -> Unit) {
     val device = vm.device
     val now = rememberNow()
+    LaunchedEffect(device?.id) { if (device != null) vm.refreshMediaSummary() }
     LazyColumn(
         Modifier.fillMaxWidth(),
         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 24.dp),
@@ -110,6 +113,7 @@ fun HomeScreen(vm: ParentViewModel, padding: PaddingValues, onOpenApp: (AppInfo)
         item { PauseCard(vm, now) }
         item { TodayCard(vm, device) }
         item { TopAppsCard(vm, device, onOpenApp) }
+        item { SafetyToolsCard(vm, device, goTab) }
 
         val issues = attentionItems(device)
         if (issues.isNotEmpty()) {
@@ -127,6 +131,51 @@ fun HomeScreen(vm: ParentViewModel, padding: PaddingValues, onOpenApp: (AppInfo)
                 }
             }
         }
+    }
+}
+
+/** One line each for the optional tools; the detail lives on their own screens, not here. */
+@Composable
+private fun SafetyToolsCard(vm: ParentViewModel, d: ChildDevice, goTab: (Tab) -> Unit) {
+    val info = d.info
+    val messages = when {
+        info == null || !info.notifAccessKnown -> "Update Guardian Child on this phone to use this"
+        !info.permNotifAccess -> "Not turned on on the phone (optional)"
+        d.commsAt > 0L -> "Previews on · synced " + Formats.relative(d.commsAt)
+        else -> "Previews on · nothing synced yet"
+    }
+    val settings = vm.mediaSettings
+    val status = vm.mediaStatus
+    val needsPermission = vm.mediaSummaryReady && settings.enabled && status?.access == MediaAccess.NONE
+    val media = when {
+        !vm.mediaSummaryReady -> "Photo and video previews"
+        !settings.enabled -> "Off · nothing is copied"
+        status == null -> "On · waiting for the phone to report"
+        needsPermission -> "On · photo access is off on the phone"
+        else -> "On · ${status.uploaded} backed up, ${status.pending} waiting"
+    }
+    SectionTitle("Messages & media", subtitle = "Optional tools. Open one for details.")
+    GCard(padding = 4.dp) {
+        ToolRow(GIcon.Chat, "Messages", messages, null) { goTab(Tab.Messages) }
+        HorizontalDivider(Modifier.padding(horizontal = 12.dp), color = gColors.stroke)
+        ToolRow(GIcon.Photo, "Shared media", media, if (needsPermission) "Needs permission" else null) { goTab(Tab.Media) }
+    }
+}
+
+@Composable
+private fun ToolRow(icon: GIcon, title: String, line: String, flag: String?, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        GIconView(icon, MaterialTheme.colorScheme.primary, size = 24.dp)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(line, style = MaterialTheme.typography.bodySmall, color = gColors.muted)
+        }
+        if (flag != null) { Pill(flag, gColors.warning); Spacer(Modifier.width(8.dp)) }
+        GIconView(GIcon.Chevron, gColors.muted, size = 20.dp)
     }
 }
 

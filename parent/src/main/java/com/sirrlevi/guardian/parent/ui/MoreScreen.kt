@@ -19,14 +19,24 @@ import com.sirrlevi.guardian.parent.ParentViewModel
 import com.sirrlevi.guardian.parent.Tab
 
 private class MoreItem(val tab: Tab, val icon: GIcon, val title: String, val body: String)
+private class MoreSection(val title: String, val items: List<MoreItem>)
 
-/** Everything that is not in the bottom bar. New parent tools get a row here instead of crowding the bar. */
+/**
+ * Everything that is not in the bottom bar, grouped so the list stays readable as tools are added.
+ * Only tools that really work get a row; nothing here is a placeholder.
+ */
 @Composable
 fun MoreScreen(vm: ParentViewModel, padding: PaddingValues, open: (Tab) -> Unit) {
-    val items = listOf(
-        MoreItem(Tab.Media, GIcon.Photo, "Shared media", "Optional preview copies of new photos and videos. Off until you turn it on."),
-        MoreItem(Tab.Reports, GIcon.Chart, "Reports", "Weekly and monthly screen time, trends and top apps."),
-        MoreItem(Tab.Settings, GIcon.Settings, "Settings", "Pair a phone, app updates, theme and account.")
+    val sections = listOf(
+        MoreSection("Insights", listOf(
+            MoreItem(Tab.Reports, GIcon.Chart, "Reports", "Weekly and monthly screen time, trends and top apps.")
+        )),
+        MoreSection("Optional tools", listOf(
+            MoreItem(Tab.Media, GIcon.Photo, "Shared media", "Optional preview copies of new photos and videos. Off until you turn it on.")
+        )),
+        MoreSection("Guardian", listOf(
+            MoreItem(Tab.Settings, GIcon.Settings, "Settings", "Pair a phone, app updates, theme and account.")
+        ))
     )
     LazyColumn(
         Modifier.fillMaxWidth(),
@@ -39,17 +49,23 @@ fun MoreScreen(vm: ParentViewModel, padding: PaddingValues, open: (Tab) -> Unit)
                 Text(vm.device?.name ?: "Guardian", style = MaterialTheme.typography.bodyMedium, color = gColors.muted)
             }
         }
-        items(items.size) { i ->
-            val item = items[i]
-            GCard(onClick = { open(item.tab) }) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    GIconView(item.icon, MaterialTheme.colorScheme.primary, size = 26.dp)
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(item.title, style = MaterialTheme.typography.titleMedium)
-                        Text(item.body, style = MaterialTheme.typography.bodySmall, color = gColors.muted, modifier = Modifier.padding(top = 2.dp))
+        sections.forEach { section ->
+            item(key = "section-" + section.title) {
+                Text(section.title, style = MaterialTheme.typography.labelLarge, color = gColors.muted, modifier = Modifier.padding(top = 4.dp))
+            }
+            section.items.forEach { entry ->
+                item(key = entry.tab.name) {
+                    GCard(onClick = { open(entry.tab) }) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            GIconView(entry.icon, MaterialTheme.colorScheme.primary, size = 26.dp)
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(entry.title, style = MaterialTheme.typography.titleMedium)
+                                Text(entry.body, style = MaterialTheme.typography.bodySmall, color = gColors.muted, modifier = Modifier.padding(top = 2.dp))
+                            }
+                            GIconView(GIcon.Chevron, gColors.muted, size = 20.dp)
+                        }
                     }
-                    GIconView(GIcon.Chevron, gColors.muted, size = 20.dp)
                 }
             }
         }

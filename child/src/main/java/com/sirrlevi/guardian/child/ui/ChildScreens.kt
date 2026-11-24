@@ -246,8 +246,17 @@ fun TodayScreen(vm: ChildViewModel, padding: PaddingValues, goTab: (ChildTab) ->
             KCard(container = kc.primarySoft) {
                 Text("🔍  What your parent can see", style = MaterialTheme.typography.titleSmall, color = kc.text)
                 Spacer(Modifier.height(4.dp))
-                Text("Which apps you use and for how long, the apps installed on this phone, and pages opened in Guardian Browser. " +
-                    "Not your messages, photos, camera or microphone.", style = MaterialTheme.typography.bodySmall, color = kc.muted)
+                Text("Always: which apps you use and for how long, when the screen turns on or off or the phone is unlocked, the apps installed on this phone, and pages opened in Guardian Browser.",
+                    style = MaterialTheme.typography.bodySmall, color = kc.muted)
+                Spacer(Modifier.height(6.dp))
+                Text("Only if you turn on Message previews (Protection tab): the sender and preview text of chat notifications, as Android shows them. Not full chats.",
+                    style = MaterialTheme.typography.bodySmall, color = kc.muted)
+                Spacer(Modifier.height(6.dp))
+                Text("Only if your parent turns on photo backup and you allow photo access: smaller preview copies of new photos and one picture from each new video.",
+                    style = MaterialTheme.typography.bodySmall, color = kc.muted)
+                Spacer(Modifier.height(6.dp))
+                Text("Guardian never uses your camera or microphone. Every permission it asks for is listed in the Protection tab.",
+                    style = MaterialTheme.typography.bodySmall, color = kc.muted)
             }
         }
     }

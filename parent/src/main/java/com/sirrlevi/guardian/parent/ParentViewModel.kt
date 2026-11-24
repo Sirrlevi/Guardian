@@ -99,6 +99,10 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     var mediaError by mutableStateOf<String?>(null); private set
     var mediaHasMore by mutableStateOf(false); private set
     var mediaSaving by mutableStateOf(false); private set
+    /** True once the backup switch and the phone's report have been read (Home uses this without loading pictures). */
+    var mediaSummaryReady by mutableStateOf(false); private set
+    private var mediaSummaryAt = 0L
+    private val summaryBusy = AtomicBoolean(false)
     private var mediaCursor: String? = null
     private var mediaFor: String? = null
     private val mediaBusy = AtomicBoolean(false)
@@ -236,7 +240,36 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     private fun resetMedia() {
         mediaItems = emptyList(); mediaStatus = null; mediaSettings = MediaSettings(); mediaLoaded = false; mediaLoading = false
         mediaError = null; mediaHasMore = false; mediaCursor = null; mediaFor = null
+        mediaSummaryReady = false; mediaSummaryAt = 0L
         synchronized(previewCache) { previewCache.clear() }
+    }
+
+    /** Cheap check for the Home screen: the backup switch and what the phone reports, without any pictures. */
+    fun refreshMediaSummary() {
+        val s0 = session ?: return
+        val d = device ?: return
+        if (mediaSaving) return
+        if (mediaFor == d.id && mediaSummaryReady && System.currentTimeMillis() - mediaSummaryAt < 60_000L) return
+        if (!summaryBusy.compareAndSet(false, true)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val s = repo.fresh(s0); session = s
+                val settings = repo.fetchMediaSettings(s, d.id)
+                val status = try { repo.fetchMediaStatus(s, d.id) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                withContext(Dispatchers.Main) {
+                    if (device?.id != d.id) return@withContext
+                    mediaFor = d.id
+                    mediaSettings = settings; mediaStatus = status
+                    mediaSummaryReady = true; mediaSummaryAt = System.currentTimeMillis()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Home just keeps showing a neutral line; the Shared media screen reports real errors.
+            } finally {
+                summaryBusy.set(false)
+            }
+        }
     }
 
     /** Loads settings, child-reported status and the newest page of previews for the selected phone. */
@@ -258,6 +291,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
                     mediaSettings = settings; mediaStatus = status
                     mediaItems = page.items; mediaHasMore = page.hasMore; mediaCursor = page.oldestKey
                     mediaError = null; mediaLoaded = true; mediaLoading = false
+                    mediaSummaryReady = true; mediaSummaryAt = System.currentTimeMillis()
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -369,7 +403,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     internal fun showMediaForTest(items: List<MediaItem>, settings: MediaSettings = MediaSettings(), status: MediaStatusSnapshot? = null, hasMore: Boolean = false, error: String? = null) {
         mediaFor = device?.id
         mediaItems = items; mediaSettings = settings; mediaStatus = status; mediaHasMore = hasMore
-        mediaError = error; mediaLoaded = true; mediaLoading = false
+        mediaError = error; mediaLoaded = true; mediaLoading = false; mediaSummaryReady = true
     }
 
     private fun resetComms() {
