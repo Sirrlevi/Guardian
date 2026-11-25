@@ -62,7 +62,12 @@ data class DeviceInfo(
     /** Whether Android notification access (message previews) is switched on for Guardian Child. */
     val permNotifAccess: Boolean = false,
     /** False when the child app is too old to report notification access at all (so "off" would be a guess). */
-    val notifAccessKnown: Boolean = false
+    val notifAccessKnown: Boolean = false,
+    /** What the child's Guardian service said about itself in its last report ("running"); false when the report doesn't say. */
+    val monitorRunning: Boolean = false,
+    val monitorKnown: Boolean = false,
+    /** Android's API level, 0 when the report doesn't say. */
+    val sdk: Int = 0
 )
 
 data class SessionRow(val pkg: String, val name: String, val start: Long, val end: Long) {
@@ -114,7 +119,7 @@ data class ChildDevice(
  */
 enum class Tab(val label: String, val inBar: Boolean = true) {
     Home("Home"), Apps("Apps"), Activity("Activity"), Messages("Messages"), More("More"),
-    Reports("Reports", false), Settings("Settings", false), Media("Shared media", false), Preview("Screen preview", false)
+    Reports("Reports", false), Settings("Settings", false), Media("Shared media", false), Preview("Screen preview", false), Controls("Device controls", false)
 }
 
 enum class ThemeMode { System, Dark, Light }

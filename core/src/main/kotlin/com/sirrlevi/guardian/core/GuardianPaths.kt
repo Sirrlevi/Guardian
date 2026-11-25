@@ -46,4 +46,17 @@ object GuardianPaths {
     fun captureLiveBlob(familyId: String, deviceId: String) = capture(familyId, deviceId) + "/liveblob"
     /** Short history of what happened (asked, approved, screenshot, ended …) so the parent and child can see it. */
     fun captureLog(familyId: String, deviceId: String) = capture(familyId, deviceId) + "/log"
+
+    // ---- device controls (lock now, restart)
+    fun control(familyId: String, deviceId: String) = device(familyId, deviceId) + "/control"
+    /** Written by the child: what the phone can do and its lock state. */
+    fun controlStatus(familyId: String, deviceId: String) = control(familyId, deviceId) + "/status"
+    /** Written by the parent, one node per request id. Read (and cleared) by the child. */
+    fun controlInbox(familyId: String, deviceId: String) = control(familyId, deviceId) + "/inbox"
+    fun controlCommand(familyId: String, deviceId: String, id: String) = controlInbox(familyId, deviceId) + "/" + id
+    /** Written by the child: what became of each request. */
+    fun controlAcks(familyId: String, deviceId: String) = control(familyId, deviceId) + "/acks"
+    fun controlAck(familyId: String, deviceId: String, id: String) = controlAcks(familyId, deviceId) + "/" + id
+    /** The phone's short history of requests it handled. */
+    fun controlLog(familyId: String, deviceId: String) = control(familyId, deviceId) + "/log"
 }

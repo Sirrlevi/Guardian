@@ -18,6 +18,14 @@ import com.sirrlevi.guardian.core.CaptureCommandCodec
 import com.sirrlevi.guardian.core.CaptureEvent
 import com.sirrlevi.guardian.core.CaptureEventCodec
 import com.sirrlevi.guardian.core.CaptureState
+import com.sirrlevi.guardian.core.ControlAck
+import com.sirrlevi.guardian.core.ControlAckCodec
+import com.sirrlevi.guardian.core.ControlCommand
+import com.sirrlevi.guardian.core.ControlCommandCodec
+import com.sirrlevi.guardian.core.ControlEvent
+import com.sirrlevi.guardian.core.ControlEventCodec
+import com.sirrlevi.guardian.core.ControlStatus
+import com.sirrlevi.guardian.core.ControlStatusCodec
 import com.sirrlevi.guardian.core.CaptureStateCodec
 import com.sirrlevi.guardian.core.LiveCodec
 import com.sirrlevi.guardian.core.LiveMeta
@@ -176,6 +184,29 @@ class ParentRepository(context: Context) {
         val pieces = node.entrySet().mapNotNull { (k, v) -> v.takeIf { it.isJsonPrimitive }?.let { k to it.asString } }.toMap()
         val base64 = MediaChunks.join(pieces, expectedChunks) ?: return null
         return try { android.util.Base64.decode(base64, android.util.Base64.DEFAULT) } catch (_: IllegalArgumentException) { null }
+    }
+
+    // ------------------------------------------------------------ device controls (lock now, restart)
+
+    fun fetchControlStatus(session: GuardianSession, deviceId: String): ControlStatus? =
+        ControlStatusCodec.fromJson(api.get(GuardianPaths.controlStatus(session.uid, deviceId), session).obj())
+
+    fun sendControlCommand(session: GuardianSession, deviceId: String, command: ControlCommand) =
+        api.put(GuardianPaths.controlCommand(session.uid, deviceId, command.id), ControlCommandCodec.toJson(command), session)
+
+    fun withdrawControlCommand(session: GuardianSession, deviceId: String, id: String) =
+        api.delete(GuardianPaths.controlCommand(session.uid, deviceId, id), session)
+
+    fun fetchControlAck(session: GuardianSession, deviceId: String, id: String): ControlAck? =
+        ControlAckCodec.fromJson(id, api.get(GuardianPaths.controlAck(session.uid, deviceId, id), session).obj())
+
+    fun deleteControlAck(session: GuardianSession, deviceId: String, id: String) =
+        api.delete(GuardianPaths.controlAck(session.uid, deviceId, id), session)
+
+    /** What the phone did about recent requests, newest first. */
+    fun fetchControlLog(session: GuardianSession, deviceId: String): List<ControlEvent> {
+        val node = api.get(GuardianPaths.controlLog(session.uid, deviceId), session).obj() ?: return emptyList()
+        return node.entrySet().sortedByDescending { it.key }.mapNotNull { (_, v) -> v.takeIf { it.isJsonObject }?.let { ControlEventCodec.fromJson(it.asJsonObject) } }
     }
 
     class DeviceMeta(val id: String, val name: String, val manufacturer: String, val lastSeen: Long)
@@ -418,7 +449,8 @@ class ParentRepository(context: Context) {
             appVersion = o.stringOr("appVersion"), enforcement = o.stringOr("enforcement", "limited"),
             permUsage = perm("usage"), permOverlay = perm("overlay"), permNotifications = perm("notifications"),
             permBattery = perm("battery"), permAdmin = perm("admin"), permVpn = perm("vpn"), permOwner = perm("owner"),
-            permNotifAccess = perm("notifAccess"), notifAccessKnown = perms?.has("notifAccess") == true
+            permNotifAccess = perm("notifAccess"), notifAccessKnown = perms?.has("notifAccess") == true,
+            monitorRunning = o.boolOrFalse("monitor"), monitorKnown = o.has("monitor"), sdk = o.intOr("sdk", 0)
         )
     }
 

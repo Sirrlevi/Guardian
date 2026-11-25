@@ -28,6 +28,9 @@ private class MoreSection(val title: String, val items: List<MoreItem>)
 @Composable
 fun MoreScreen(vm: ParentViewModel, padding: PaddingValues, open: (Tab) -> Unit) {
     val sections = listOf(
+        MoreSection("Your child's phone", listOf(
+            MoreItem(Tab.Controls, GIcon.Lock, "Device controls", "Lock the screen, restart when Android allows it, and see the phone's real status.")
+        )),
         MoreSection("Insights", listOf(
             MoreItem(Tab.Reports, GIcon.Chart, "Reports", "Weekly and monthly screen time, trends and top apps.")
         )),

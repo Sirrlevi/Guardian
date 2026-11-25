@@ -145,6 +145,8 @@ class GuardianMonitorService : Service() {
         registerMediaObserver()
         // Lets the parent's screen-sharing requests reach this phone while the monitor runs. Nothing is captured without the child's OK.
         CaptureRuntime.retain(this)
+        // Lets the parent's "lock now" and "restart" requests reach this phone. They are answered only after the phone has checked the real result.
+        ControlRuntime.retain(this)
         net.execute {
             refreshPolicy()
             syncCatalog(force = false)
@@ -153,7 +155,7 @@ class GuardianMonitorService : Service() {
     }
 
     override fun onDestroy() {
-        if (alive) CaptureRuntime.release()
+        if (alive) { CaptureRuntime.release(); ControlRuntime.release() }
         alive = false
         running = false
         try { streamCall?.cancel() } catch (_: Exception) { }

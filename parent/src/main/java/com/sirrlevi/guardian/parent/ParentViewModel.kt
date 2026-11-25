@@ -95,6 +95,11 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     @androidx.annotation.VisibleForTesting
     internal var previewBackendForTest: PreviewBackend? = null
 
+    /** Lock now, restart and the phone's real status. Polls only while its screen is open. */
+    val controls = DeviceControlModel(backend = { controlBackendForTest ?: RepoControlBackend(repo, { session }, { session = it }, { device?.id }) })
+    @androidx.annotation.VisibleForTesting
+    internal var controlBackendForTest: ControlBackend? = null
+
     // ---- shared media (preview copies of the child's new photos and videos)
     var mediaItems by mutableStateOf<List<MediaItem>>(emptyList()); private set
     var mediaSettings by mutableStateOf(MediaSettings()); private set
@@ -220,6 +225,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     fun signOut() {
         stopRealtime()
         preview.reset()
+        controls.reset()
         repo.clearSession()
         session = null
         devices = emptyList()
@@ -239,6 +245,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         resetComms()
         resetMedia()
         preview.reset()
+        controls.reset()
         stopRealtime()
         startRealtime()
         refreshAll(silent = false)
@@ -576,6 +583,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     /** Call when the app comes to the front: opens the live connection and keeps the heavy data fresh. */
     fun onForeground() {
         preview.foreground = true
+        controls.foreground = true
         if (session == null) return
         startRealtime()
         pollJob?.cancel()
@@ -590,6 +598,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
 
     fun onBackground() {
         preview.foreground = false
+        controls.foreground = false
         pollJob?.cancel()
         stopRealtime()
     }
