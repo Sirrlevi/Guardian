@@ -33,7 +33,11 @@ class ScreenPreviewScreenTest {
     @get:Rule val rule = createComposeRule()
 
     @org.junit.Before fun shortIdleTimeout() { // TEMP diag
-        androidx.test.espresso.IdlingPolicies.setMasterPolicyTimeout(8, java.util.concurrent.TimeUnit.SECONDS)
+        try {
+            Class.forName("androidx.test.espresso.IdlingPolicies")
+                .getMethod("setMasterPolicyTimeout", java.lang.Long.TYPE, java.util.concurrent.TimeUnit::class.java)
+                .invoke(null, 8L, java.util.concurrent.TimeUnit.SECONDS)
+        } catch (e: Throwable) { System.err.println("DIAG-DUMP no idle policy: $e") }
     }
 
     private val now = System.currentTimeMillis()
