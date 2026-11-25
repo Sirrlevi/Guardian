@@ -66,4 +66,29 @@ class PreviewDiagTest {
         rule.setContent { GuardianTheme(ThemeMode.Light) { Text("hello") } }
         rule.waitForIdle()
     }
+
+    /** F: like A, plus a fake backend. */
+    @Test fun f_withBackend() {
+        val vm = vm()
+        vm.previewBackendForTest = FakePreviewBackend()
+        vm.preview.showForTest(null, now = 1_800_000_000_000L)
+        rule.setContent { GuardianTheme(ThemeMode.Light) { ScreenPreviewScreen(vm, PaddingValues(0.dp), watching = false) } }
+        rule.waitForIdle()
+    }
+
+    /** G: like A, with the real clock value. */
+    @Test fun g_realNow() {
+        val vm = vm()
+        vm.preview.showForTest(null, now = System.currentTimeMillis())
+        rule.setContent { GuardianTheme(ThemeMode.Light) { ScreenPreviewScreen(vm, PaddingValues(0.dp), watching = false) } }
+        rule.waitForIdle()
+    }
+
+    /** H: like A, with every argument the real tests pass. */
+    @Test fun h_allArguments() {
+        val vm = vm()
+        vm.preview.showForTest(null, emptyList(), emptyList(), error = null, notice = null, noticeIsProblem = false, now = 1_800_000_000_000L)
+        rule.setContent { GuardianTheme(ThemeMode.Light) { ScreenPreviewScreen(vm, PaddingValues(0.dp), watching = false) } }
+        rule.waitForIdle()
+    }
 }
