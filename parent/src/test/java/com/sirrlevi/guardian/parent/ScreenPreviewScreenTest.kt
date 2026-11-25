@@ -32,14 +32,6 @@ import kotlin.coroutines.EmptyCoroutineContext
 class ScreenPreviewScreenTest {
     @get:Rule val rule = createComposeRule()
 
-    @org.junit.Before fun shortIdleTimeout() { // TEMP diag
-        try {
-            Class.forName("androidx.test.espresso.IdlingPolicies")
-                .getMethod("setMasterPolicyTimeout", java.lang.Long.TYPE, java.util.concurrent.TimeUnit::class.java)
-                .invoke(null, 8L, java.util.concurrent.TimeUnit.SECONDS)
-        } catch (e: Throwable) { System.err.println("DIAG-DUMP no idle policy: $e") }
-    }
-
     private val now = System.currentTimeMillis()
 
     private fun device() = ChildDevice(
@@ -58,21 +50,8 @@ class ScreenPreviewScreenTest {
         // Everything stays on the test's own thread: no background threads can outlive a test or leave Compose's idle check waiting.
         vm.preview.io = EmptyCoroutineContext
         vm.preview.showForTest(state, shots, log, error = error, notice = notice, noticeIsProblem = problem, now = now)
-        val testThread = Thread.currentThread()
-        val done = java.util.concurrent.atomic.AtomicBoolean(false)
-        Thread {
-            Thread.sleep(5_000L)
-            if (!done.get()) {
-                System.err.println("DIAG-DUMP test thread stack:")
-                testThread.stackTrace.take(60).forEach { System.err.println("DIAG-DUMP   at $it") }
-                Thread.getAllStackTraces().forEach { (t, st) ->
-                    if (t !== testThread) { System.err.println("DIAG-DUMP thread ${t.name} state=${t.state}"); st.take(14).forEach { System.err.println("DIAG-DUMP     at $it") } }
-                }
-            }
-        }.apply { isDaemon = true; start() }
         rule.setContent { GuardianTheme(ThemeMode.Light) { ScreenPreviewScreen(vm, PaddingValues(0.dp), watching = false) } }
         rule.waitForIdle()
-        done.set(true)
         return vm
     }
 
