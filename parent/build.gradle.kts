@@ -32,7 +32,8 @@ android {
         unitTests.isIncludeAndroidResources = true
         unitTests.all { test ->
             test.testLogging {
-                events("failed")
+                events("passed", "failed", "skipped") // TEMP diag
+                showStandardStreams = true // TEMP diag
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
             }
         }
