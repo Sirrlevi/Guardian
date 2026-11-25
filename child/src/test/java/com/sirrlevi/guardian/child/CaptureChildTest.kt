@@ -3,6 +3,9 @@ package com.sirrlevi.guardian.child
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
@@ -77,11 +80,16 @@ class CaptureChildTest {
     }
 
     @Test fun dialogIsAbsentUnlessARequestIsWaiting() {
-        for (status in listOf(CaptureStatus.IDLE, CaptureStatus.ACTIVE, CaptureStatus.ENDED)) {
-            rule.setContent { ChildTheme { CaptureRequestDialog(CaptureState(status = status), {}, {}) } }
+        var status by mutableStateOf(CaptureStatus.IDLE)
+        rule.setContent { ChildTheme { CaptureRequestDialog(CaptureState(status = status), {}, {}) } }
+        for (next in listOf(CaptureStatus.IDLE, CaptureStatus.ACTIVE, CaptureStatus.ENDED)) {
+            status = next
             rule.waitForIdle()
-            assertTrue("dialog shown for $status", rule.onAllNodesWithText("Share your screen?").fetchSemanticsNodes().isEmpty())
+            assertTrue("dialog shown for $next", rule.onAllNodesWithText("Share your screen?").fetchSemanticsNodes().isEmpty())
         }
+        status = CaptureStatus.AWAITING
+        rule.waitForIdle()
+        assertTrue(rule.onAllNodesWithText("Share your screen?").fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test fun cardSaysNothingIsSharedWhenIdle() {
