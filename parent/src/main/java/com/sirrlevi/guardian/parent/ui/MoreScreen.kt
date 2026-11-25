@@ -32,7 +32,8 @@ fun MoreScreen(vm: ParentViewModel, padding: PaddingValues, open: (Tab) -> Unit)
             MoreItem(Tab.Reports, GIcon.Chart, "Reports", "Weekly and monthly screen time, trends and top apps.")
         )),
         MoreSection("Optional tools", listOf(
-            MoreItem(Tab.Media, GIcon.Photo, "Shared media", "Optional preview copies of new photos and videos. Off until you turn it on.")
+            MoreItem(Tab.Media, GIcon.Photo, "Shared media", "Optional preview copies of new photos and videos. Off until you turn it on."),
+            MoreItem(Tab.Preview, GIcon.Screen, "Screen preview", "Ask to see your child's screen. It only starts if they allow it on their phone, every time.")
         )),
         MoreSection("Guardian", listOf(
             MoreItem(Tab.Settings, GIcon.Settings, "Settings", "Pair a phone, app updates, theme and account.")

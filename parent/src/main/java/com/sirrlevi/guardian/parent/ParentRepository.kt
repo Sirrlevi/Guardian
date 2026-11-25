@@ -11,7 +11,19 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.sirrlevi.guardian.core.CommCodec
 import com.sirrlevi.guardian.core.CommRecord
+import com.sirrlevi.guardian.core.CaptureAck
+import com.sirrlevi.guardian.core.CaptureAckCodec
+import com.sirrlevi.guardian.core.CaptureCommand
+import com.sirrlevi.guardian.core.CaptureCommandCodec
+import com.sirrlevi.guardian.core.CaptureEvent
+import com.sirrlevi.guardian.core.CaptureEventCodec
+import com.sirrlevi.guardian.core.CaptureState
+import com.sirrlevi.guardian.core.CaptureStateCodec
+import com.sirrlevi.guardian.core.LiveCodec
+import com.sirrlevi.guardian.core.LiveMeta
 import com.sirrlevi.guardian.core.MediaChunks
+import com.sirrlevi.guardian.core.ShotCodec
+import com.sirrlevi.guardian.core.ShotMeta
 import com.sirrlevi.guardian.core.MediaCodec
 import com.sirrlevi.guardian.core.MediaItem
 import com.sirrlevi.guardian.core.MediaSettings
@@ -110,6 +122,60 @@ class ParentRepository(context: Context) {
         api.put(GuardianPaths.mediaDeleted(session.uid, deviceId) + "/" + key, com.google.gson.JsonPrimitive(System.currentTimeMillis()), session)
         api.delete(GuardianPaths.mediaBlob(session.uid, deviceId, key), session)
         api.delete(GuardianPaths.mediaItem(session.uid, deviceId, key), session)
+    }
+
+    // ------------------------------------------------------------ screen sharing
+
+    fun fetchCaptureState(session: GuardianSession, deviceId: String): CaptureState? =
+        CaptureStateCodec.fromJson(api.get(GuardianPaths.captureState(session.uid, deviceId), session).obj())
+
+    fun sendCaptureCommand(session: GuardianSession, deviceId: String, command: CaptureCommand) =
+        api.put(GuardianPaths.captureCommand(session.uid, deviceId, command.id), CaptureCommandCodec.toJson(command), session)
+
+    fun fetchCaptureAck(session: GuardianSession, deviceId: String, id: String): CaptureAck? =
+        CaptureAckCodec.fromJson(id, api.get(GuardianPaths.captureAck(session.uid, deviceId, id), session).obj())
+
+    fun deleteCaptureAck(session: GuardianSession, deviceId: String, id: String) =
+        api.delete(GuardianPaths.captureAck(session.uid, deviceId, id), session)
+
+    /** Stored screenshots, newest first. A screenshot only appears here once all its pieces are stored. */
+    fun fetchShots(session: GuardianSession, deviceId: String): List<ShotMeta> {
+        val node = api.get(GuardianPaths.captureShots(session.uid, deviceId), session).obj() ?: return emptyList()
+        return node.entrySet().mapNotNull { (id, v) -> v.takeIf { it.isJsonObject }?.let { ShotCodec.fromJson(id, it.asJsonObject) } }.sortedByDescending { it.id }
+    }
+
+    fun fetchShotImage(session: GuardianSession, deviceId: String, meta: ShotMeta): ByteArray? =
+        decodePieces(api.get(GuardianPaths.captureShotBlob(session.uid, deviceId, meta.id), session).obj(), meta.chunks)
+
+    fun deleteShot(session: GuardianSession, deviceId: String, id: String) {
+        api.delete(GuardianPaths.captureShotBlob(session.uid, deviceId, id), session)
+        api.delete(GuardianPaths.captureShot(session.uid, deviceId, id), session)
+    }
+
+    fun fetchLiveMeta(session: GuardianSession, deviceId: String): LiveMeta? =
+        LiveCodec.fromJson(api.get(GuardianPaths.captureLive(session.uid, deviceId), session).obj())
+
+    fun fetchLiveImage(session: GuardianSession, deviceId: String, meta: LiveMeta): ByteArray? =
+        decodePieces(api.get(GuardianPaths.captureLiveBlob(session.uid, deviceId), session).obj(), meta.chunks)
+
+    /** What happened in recent sessions on the phone, newest first. */
+    fun fetchCaptureLog(session: GuardianSession, deviceId: String): List<CaptureEvent> {
+        val node = api.get(GuardianPaths.captureLog(session.uid, deviceId), session).obj() ?: return emptyList()
+        return node.entrySet().sortedByDescending { it.key }.mapNotNull { (_, v) -> v.takeIf { it.isJsonObject }?.let { CaptureEventCodec.fromJson(it.asJsonObject) } }
+    }
+
+    fun touchCaptureViewer(session: GuardianSession, deviceId: String, now: Long) =
+        api.put(GuardianPaths.captureViewer(session.uid, deviceId), com.google.gson.JsonPrimitive(now), session)
+
+    fun clearCaptureViewer(session: GuardianSession, deviceId: String) =
+        api.delete(GuardianPaths.captureViewer(session.uid, deviceId), session)
+
+    /** Joins the stored text pieces back into JPEG bytes, or null if any piece is missing or damaged (never a half picture). */
+    private fun decodePieces(node: JsonObject?, expectedChunks: Int): ByteArray? {
+        if (node == null) return null
+        val pieces = node.entrySet().mapNotNull { (k, v) -> v.takeIf { it.isJsonPrimitive }?.let { k to it.asString } }.toMap()
+        val base64 = MediaChunks.join(pieces, expectedChunks) ?: return null
+        return try { android.util.Base64.decode(base64, android.util.Base64.DEFAULT) } catch (_: IllegalArgumentException) { null }
     }
 
     class DeviceMeta(val id: String, val name: String, val manufacturer: String, val lastSeen: Long)

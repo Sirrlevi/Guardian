@@ -551,7 +551,7 @@ private fun MediaViewer(vm: ParentViewModel, item: MediaItem, deviceName: String
 }
 
 @Composable
-private fun ZoomableImage(bitmap: ImageBitmap, description: String) {
+internal fun ZoomableImage(bitmap: ImageBitmap, description: String) {
     var scale by remember(bitmap) { mutableFloatStateOf(1f) }
     var offset by remember(bitmap) { mutableStateOf(Offset.Zero) }
     var box by remember { mutableStateOf(IntSize.Zero) }
