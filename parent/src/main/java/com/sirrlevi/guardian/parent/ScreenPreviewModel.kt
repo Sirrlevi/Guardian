@@ -27,6 +27,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.util.UUID
+import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.coroutineContext
 
 /** Everything the Screen preview screen needs from the database. Every call blocks and may throw; the model runs them off the main thread. */
@@ -85,7 +86,9 @@ class RepoPreviewBackend(
 class ScreenPreviewModel(
     private val backend: () -> PreviewBackend,
     private val clock: () -> Long = { System.currentTimeMillis() },
-    private val newId: () -> String = { UUID.randomUUID().toString() }
+    private val newId: () -> String = { UUID.randomUUID().toString() },
+    /** Where blocking database calls run. Tests pass an empty context so everything stays on the test's own thread. */
+    @Volatile var io: CoroutineContext = Dispatchers.IO
 ) {
     var state by mutableStateOf<CaptureState?>(null); private set
     var loaded by mutableStateOf(false); private set
@@ -125,11 +128,11 @@ class ScreenPreviewModel(
     suspend fun watch() {
         try {
             while (coroutineContext.isActive) {
-                val wait = if (!foreground) 1_000L else withContext(Dispatchers.IO) { tick() }
+                val wait = if (!foreground) 1_000L else withContext(io) { tick() }
                 delay(wait)
             }
         } finally {
-            withContext(NonCancellable + Dispatchers.IO) { goneQuietly() }
+            withContext(NonCancellable + io) { goneQuietly() }
         }
     }
 
@@ -223,7 +226,7 @@ class ScreenPreviewModel(
     suspend fun stop() = send(CaptureCmdType.STOP) { it.canStop }
 
     private suspend fun send(type: CaptureCmdType, on: Boolean = false, allowed: (CaptureView) -> Boolean): Boolean {
-        val ok = withContext(Dispatchers.IO) {
+        val ok = withContext(io) {
             mutex.withLock {
                 val t = clock()
                 if (!allowed(CaptureView.of(state, t))) {
@@ -263,14 +266,14 @@ class ScreenPreviewModel(
                 }
             }
         }
-        if (ok) withContext(Dispatchers.IO) { tick() }
+        if (ok) withContext(io) { tick() }
         return ok
     }
 
     /** The screenshot's JPEG bytes (the last few are kept so reopening is instant), or null if it can't be loaded. */
     suspend fun shotImage(meta: ShotMeta): ByteArray? {
         synchronized(imageCache) { imageCache[meta.id] }?.let { return it }
-        return withContext(Dispatchers.IO) {
+        return withContext(io) {
             try {
                 backend().shotImage(meta)?.also { synchronized(imageCache) { imageCache[meta.id] = it } }
             } catch (e: CancellationException) {
@@ -279,7 +282,7 @@ class ScreenPreviewModel(
         }
     }
 
-    suspend fun deleteShot(meta: ShotMeta): Boolean = withContext(Dispatchers.IO) {
+    suspend fun deleteShot(meta: ShotMeta): Boolean = withContext(io) {
         try {
             backend().deleteShot(meta.id)
             synchronized(imageCache) { imageCache.remove(meta.id) }

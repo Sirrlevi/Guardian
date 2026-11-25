@@ -24,6 +24,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlin.coroutines.EmptyCoroutineContext
 
 /** The Screen preview screen must show the phone's real state, offer only what is possible, and never claim sharing before the child allows it. */
 @RunWith(RobolectricTestRunner::class)
@@ -45,7 +46,9 @@ class ScreenPreviewScreenTest {
     ): ParentViewModel {
         val vm = ParentViewModel(ApplicationProvider.getApplicationContext())
         vm.showForTest(if (withDevice) listOf(device()) else emptyList(), FamilyPolicy())
-        vm.previewBackendForTest = backend
+        vm.previewBackendForTest = backend ?: FakePreviewBackend()
+        // Everything stays on the test's own thread: no background threads can outlive a test or leave Compose's idle check waiting.
+        vm.preview.io = EmptyCoroutineContext
         vm.preview.showForTest(state, shots, log, error = error, notice = notice, noticeIsProblem = problem, now = now)
         rule.setContent { GuardianTheme(ThemeMode.Light) { ScreenPreviewScreen(vm, PaddingValues(0.dp), watching = false) } }
         rule.waitForIdle()

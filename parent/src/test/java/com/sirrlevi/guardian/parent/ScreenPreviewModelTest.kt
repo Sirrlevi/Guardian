@@ -24,6 +24,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.IOException
+import kotlin.coroutines.EmptyCoroutineContext
 
 /** A phone and a database in memory, so the parent's side of screen sharing can be exercised without a network. */
 class FakePreviewBackend : PreviewBackend {
@@ -64,7 +65,7 @@ class ScreenPreviewModelTest {
     private var time = 1_800_000_000_000L
     private val backend = FakePreviewBackend()
     private var counter = 0
-    private val model = ScreenPreviewModel({ backend }, { time }, { "command-" + (++counter).toString().padStart(4, '0') })
+    private val model = ScreenPreviewModel({ backend }, { time }, { "command-" + (++counter).toString().padStart(4, '0') }, io = EmptyCoroutineContext)
 
     private fun active(live: Boolean = false, heartbeat: Long = time, lastShot: Long = 0L, expires: Long = time + 600_000L) =
         CaptureState(status = CaptureStatus.ACTIVE, sessionId = "s1", since = time - 5_000L, expiresAt = expires, live = live, heartbeat = heartbeat, lastShotAt = lastShot, width = 540, height = 1200)
