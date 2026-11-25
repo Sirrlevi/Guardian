@@ -20,9 +20,6 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 import java.io.IOException
 import kotlin.coroutines.EmptyCoroutineContext
 
@@ -59,8 +56,10 @@ class FakePreviewBackend : PreviewBackend {
     override fun viewerGone() { viewerCleared++ }
 }
 
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+/**
+ * Plain JVM test on purpose: the model only needs Compose's state runtime, and running it under Robolectric wrote Compose state
+ * outside any composition in the same sandbox the screen tests later run in, which left their Compose idle check spinning forever.
+ */
 class ScreenPreviewModelTest {
     private var time = 1_800_000_000_000L
     private val backend = FakePreviewBackend()
