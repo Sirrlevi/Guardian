@@ -276,7 +276,7 @@ class DeviceControlTest {
     }
 
     @Test fun thereIsNoUnlockOrShutdownType() {
-        assertEquals(listOf("lock", "reboot"), ControlType.values().map { it.code })
+        assertEquals("only these requests exist; nothing can unlock, shut down or erase", listOf("lock", "reboot", "ring", "locate"), ControlType.values().map { it.code })
         assertNull(ControlType.fromCode("unlock"))
         assertNull(ControlType.fromCode("shutdown"))
     }
