@@ -29,6 +29,7 @@ private class MoreSection(val title: String, val items: List<MoreItem>)
 fun MoreScreen(vm: ParentViewModel, padding: PaddingValues, open: (Tab) -> Unit) {
     val sections = listOf(
         MoreSection("Your child's phone", listOf(
+            MoreItem(Tab.Recovery, GIcon.Pin, "Find my phone", "See where the phone was last, make it ring, or lock it. Location is off until you turn it on and your child allows it."),
             MoreItem(Tab.Controls, GIcon.Lock, "Device controls", "Lock the screen, restart when Android allows it, and see the phone's real status.")
         )),
         MoreSection("Insights", listOf(

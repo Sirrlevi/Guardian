@@ -124,6 +124,20 @@ object ControlLabels {
                 ControlResult.FAILED -> "Restart failed"
                 ControlResult.EXPIRED -> "Restart request expired before the phone saw it"
             }
+            ControlType.RING -> when (e.result) {
+                ControlResult.DONE -> "Phone rang (confirmed by the phone)"
+                ControlResult.REJECTED -> "Ring refused by the phone"
+                ControlResult.FAILED -> "Ring failed"
+                ControlResult.EXPIRED -> "Ring request expired before the phone saw it"
+                ControlResult.RESTARTING -> "Ring request"
+            }
+            ControlType.LOCATE -> when (e.result) {
+                ControlResult.DONE -> "Position read (confirmed by the phone)"
+                ControlResult.REJECTED -> "Find now refused by the phone"
+                ControlResult.FAILED -> "Find now: no position could be read"
+                ControlResult.EXPIRED -> "Find now expired before the phone saw it"
+                ControlResult.RESTARTING -> "Find now request"
+            }
             null -> "Unsupported request (" + e.typeCode.ifBlank { "unknown" } + ") refused"
         }
     }

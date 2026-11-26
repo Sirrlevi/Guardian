@@ -13,6 +13,7 @@ import com.sirrlevi.guardian.core.ControlResult
 import com.sirrlevi.guardian.core.ControlStatus
 import com.sirrlevi.guardian.core.ControlTexts
 import com.sirrlevi.guardian.core.ControlType
+import com.sirrlevi.guardian.core.RecoveryTexts
 import com.sirrlevi.guardian.core.GuardianSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +69,8 @@ class DeviceControlModel(
     private val backend: () -> ControlBackend,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val newId: () -> String = { "ctl-" + UUID.randomUUID().toString().replace("-", "").take(28) },
+    /** Whether "find now" may be sent, from what the phone said about its location settings (the Find my phone screen supplies it). */
+    private val locateGate: () -> ControlOffer.Option = { ControlOffer.Option(true, "") },
     /** Where blocking database calls run. Tests pass an empty context so everything stays on the test's own thread. */
     @Volatile var io: CoroutineContext = Dispatchers.IO
 ) {
@@ -90,6 +93,10 @@ class DeviceControlModel(
 
     val lockOffer: ControlOffer.Option get() = ControlOffer.lock(status)
     val rebootOffer: ControlOffer.Option get() = ControlOffer.reboot(status)
+    val ringOffer: ControlOffer.Option get() = ControlOffer.ring(status)
+    val locateOffer: ControlOffer.Option get() = locateGate()
+    /** True while the phone's own fresh report says it is ringing. */
+    val ringing: Boolean get() = ControlOffer.isRinging(status, now.takeIf { it > 0L } ?: clock())
     val statusIsOld: Boolean get() = ControlOffer.isStale(status, now.takeIf { it > 0L } ?: clock())
 
     private class Pending(val id: String, val type: ControlType, val sentAt: Long, val expiresAt: Long, var restarting: Boolean = false)
@@ -150,6 +157,8 @@ class DeviceControlModel(
                     when (p.type) {
                         ControlType.LOCK -> "Locked. The phone checked and confirmed it."
                         ControlType.REBOOT -> ControlTexts.BACK
+                        ControlType.RING -> ack.reason.ifBlank { RecoveryTexts.RING_STARTED }
+                        ControlType.LOCATE -> ack.reason.ifBlank { RecoveryTexts.LOCATED }
                     },
                     problem = false
                 )
@@ -173,12 +182,19 @@ class DeviceControlModel(
 
     suspend fun lock(): Boolean = send(ControlType.LOCK)
     suspend fun reboot(): Boolean = send(ControlType.REBOOT)
+    suspend fun ring(): Boolean = send(ControlType.RING)
+    suspend fun locate(): Boolean = send(ControlType.LOCATE)
 
     private suspend fun send(type: ControlType): Boolean {
         val ok = withContext(io) {
             mutex.withLock {
                 val t = clock()
-                val offer = if (type == ControlType.LOCK) ControlOffer.lock(status) else ControlOffer.reboot(status)
+                val offer = when (type) {
+                    ControlType.LOCK -> ControlOffer.lock(status)
+                    ControlType.REBOOT -> ControlOffer.reboot(status)
+                    ControlType.RING -> ControlOffer.ring(status)
+                    ControlType.LOCATE -> locateGate()
+                }
                 if (!offer.available) {
                     say(offer.why, problem = true)
                     return@withLock false
@@ -197,6 +213,8 @@ class DeviceControlModel(
                         when (type) {
                             ControlType.LOCK -> "Request sent. This only counts as done once the phone confirms it locked."
                             ControlType.REBOOT -> "Request sent. Waiting for the phone to accept it."
+                            ControlType.RING -> "Request sent. This only counts as done once the phone confirms the sound started."
+                            ControlType.LOCATE -> "Looking for the phone. This can take up to half a minute."
                         },
                         problem = false
                     )

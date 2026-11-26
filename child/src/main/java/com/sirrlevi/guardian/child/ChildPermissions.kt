@@ -94,8 +94,21 @@ object ChildPermissions {
         Item("notifaccess", "Message previews (optional)",
             "Lets Guardian share the preview text that chat notifications (WhatsApp, Instagram, SMS…) already show on this phone with your parent. It never sees whole chats, and you can turn it off here any time.",
             hasNotificationAccess(context), false),
-        mediaItem(context)
+        mediaItem(context),
+        locationItem(context)
     )
+
+    private fun locationItem(context: Context): Item {
+        val permission = AndroidLocationSource(context).permission()
+        val status = when (permission) {
+            com.sirrlevi.guardian.core.LocationPermission.ALWAYS -> " Right now: allowed all the time."
+            com.sirrlevi.guardian.core.LocationPermission.WHILE_OPEN -> " Right now: allowed only while Guardian Child is open. Choose \"Allow all the time\" so it also works when the app is closed."
+            com.sirrlevi.guardian.core.LocationPermission.NONE -> ""
+        }
+        return Item("location", "Location (optional)",
+            "Only if your parent switches on Find my phone: Guardian shares this phone's position with your parent so a lost phone can be found. Nothing is read until your parent switches it on and you allow it here. You can take it away in Android settings any time.$status",
+            permission == com.sirrlevi.guardian.core.LocationPermission.ALWAYS, false)
+    }
 
     private fun mediaItem(context: Context): Item {
         val access = mediaAccess(context)
@@ -115,7 +128,7 @@ object ChildPermissions {
         "battery" -> Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + context.packageName))
         "notifications" -> Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
         "notifaccess" -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-        "media" -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + context.packageName))
+        "media", "location" -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + context.packageName))
         "admin" -> Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
             .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(context, GuardianAdminReceiver::class.java))
             .putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Guardian asks for confirmation before it can be removed from this device.")

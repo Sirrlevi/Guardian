@@ -17,6 +17,7 @@ import com.sirrlevi.guardian.core.ControlEvent
 import com.sirrlevi.guardian.core.ControlEventCodec
 import com.sirrlevi.guardian.core.ControlHost
 import com.sirrlevi.guardian.core.ControlInboxCodec
+import com.sirrlevi.guardian.core.ControlOutcome
 import com.sirrlevi.guardian.core.ControlPolicy
 import com.sirrlevi.guardian.core.ControlProcessor
 import com.sirrlevi.guardian.core.ControlStatus
@@ -26,6 +27,7 @@ import com.sirrlevi.guardian.core.GuardianPaths
 import com.sirrlevi.guardian.core.GuardianSession
 import com.sirrlevi.guardian.core.PendingReboot
 import com.sirrlevi.guardian.core.ProcessedIds
+import com.sirrlevi.guardian.core.RecoveryCoordinator
 import java.io.IOException
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -115,6 +117,16 @@ internal class AndroidControlHost(context: Context) : ControlHost {
     override fun reboot() = policy.reboot(admin)
     override fun bootAt(): Long = System.currentTimeMillis() - SystemClock.elapsedRealtime()
 
+    /** Location sharing and "find now"; ticked by [ControlRuntime] and asked by the parent's locate request. */
+    val recovery: RecoveryCoordinator by lazy {
+        RecoveryCoordinator(CloudRecoveryStore(ChildCloud(app)), AndroidLocationSource(app), log = { message, error -> Log.w("GuardianRecovery", message, error) })
+    }
+
+    override fun canRing(): Boolean = Ringer.canShowNotice(app)
+    override fun ring(): ControlOutcome = Ringer.start(app, now())
+    override fun ringUntil(): Long = Ringer.ringUntil()
+    override fun locate(): ControlOutcome = recovery.locate()
+
     override fun pendingReboot(): PendingReboot? {
         val id = prefs.getString("reboot_id", null) ?: return null
         return PendingReboot(id, prefs.getLong("reboot_at", 0L))
@@ -144,7 +156,13 @@ internal object ControlRuntime {
     @Volatile private var processor: ControlProcessor? = null
     @Volatile private var host: AndroidControlHost? = null
     private var lastPollAt = 0L
-    private var lastStatusAt = 0L
+    @Volatile private var lastStatusAt = 0L
+
+    /** The parent's location settings as this phone last read them, or null before the first read. */
+    fun recoverySettings(): com.sirrlevi.guardian.core.RecoverySettings? = host?.recovery?.snapshot()
+
+    /** Something the parent can see changed (for example the ring was stopped on the phone): report it at the next tick. */
+    fun statusChanged() { lastStatusAt = 0L }
 
     private fun processor(app: Context): ControlProcessor {
         processor?.let { return it }
@@ -163,6 +181,7 @@ internal object ControlRuntime {
         if (ticker == null) {
             val app = context.applicationContext
             lastPollAt = 0L; lastStatusAt = 0L
+            Ringer.clearStale(app)
             ticker = worker.scheduleWithFixedDelay({ tick(app) }, 2_000L, 2_000L, TimeUnit.MILLISECONDS)
         }
     }
@@ -187,6 +206,8 @@ internal object ControlRuntime {
                     Log.w(TAG, "poll failed", e)
                 }
             }
+            if (Ringer.ringUntil() in 1..now) { Ringer.stopIfOver(app, now); lastStatusAt = 0L }
+            try { host?.recovery?.tick() } catch (e: Exception) { Log.w(TAG, "location tick failed", e) }
             if (now - lastStatusAt >= STATUS_EVERY_MS) {
                 lastStatusAt = now
                 try { p.reportStatus() } catch (e: Exception) { Log.w(TAG, "status not sent", e); lastStatusAt = now - STATUS_EVERY_MS + 10_000L }

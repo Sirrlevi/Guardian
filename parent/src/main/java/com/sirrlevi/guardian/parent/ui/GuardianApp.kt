@@ -53,6 +53,7 @@ private fun Tab.icon(): GIcon = when (this) {
     Tab.Media -> GIcon.Photo
     Tab.Preview -> GIcon.Screen
     Tab.Controls -> GIcon.Lock
+    Tab.Recovery -> GIcon.Pin
 }
 
 /**
@@ -144,6 +145,7 @@ private fun MainShell(vm: ParentViewModel, requestedTab: Tab?, onRequestedTabCon
                 Tab.Media -> MediaScreen(vm, padding)
                 Tab.Preview -> ScreenPreviewScreen(vm, padding)
                 Tab.Controls -> DeviceControlsScreen(vm, padding)
+                Tab.Recovery -> RecoveryScreen(vm, padding)
             }
         }
     }

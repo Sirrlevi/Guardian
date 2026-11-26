@@ -53,6 +53,20 @@ class ChildActivity : ComponentActivity() {
             }
         }
 
+    // Location: first the normal permission, then (as Android requires) "all the time" as a separate step.
+    private val locationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            vm.refreshLocal()
+            when (AndroidLocationSource(this).permission()) {
+                com.sirrlevi.guardian.core.LocationPermission.NONE -> vm.message = "Location wasn't allowed, so nothing is shared. You can allow it later in Android Settings → Apps → Guardian Child → Permissions."
+                com.sirrlevi.guardian.core.LocationPermission.WHILE_OPEN -> vm.message = "Location is allowed while the app is open. Tap Turn on again to choose \"Allow all the time\" if you want it to work in the background."
+                com.sirrlevi.guardian.core.LocationPermission.ALWAYS -> Unit
+            }
+        }
+
+    private val backgroundLocationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { vm.refreshLocal() }
+
     private val vpnConsent =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) startVpnService()
@@ -141,6 +155,7 @@ class ChildActivity : ComponentActivity() {
 
     private fun grantPermission(id: String) {
         if (id == "vpn") { requestVpn(); return }
+        if (id == "location") { requestLocation(); return }
         if (id == "media" && ChildPermissions.mediaAccess(this) == com.sirrlevi.guardian.core.MediaAccess.NONE) {
             mediaPermission.launch(ChildPermissions.mediaPermissionsToRequest())
             return
@@ -156,6 +171,21 @@ class ChildActivity : ComponentActivity() {
             startActivity(intent)
         } catch (_: Exception) {
             try { startActivity(Intent(Settings.ACTION_SETTINGS)) } catch (_: Exception) { }
+        }
+    }
+
+    private fun requestLocation() {
+        when (AndroidLocationSource(this).permission()) {
+            com.sirrlevi.guardian.core.LocationPermission.NONE ->
+                locationPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            com.sirrlevi.guardian.core.LocationPermission.WHILE_OPEN ->
+                if (Build.VERSION.SDK_INT == 29) backgroundLocationPermission.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                else {
+                    // From Android 11 the "all the time" choice lives in the app's own permission screen, not in a pop-up.
+                    vm.message = "In the next screen choose Permissions → Location → Allow all the time."
+                    ChildPermissions.settingsIntent(this, "location")?.let { try { startActivity(it) } catch (_: Exception) { } }
+                }
+            com.sirrlevi.guardian.core.LocationPermission.ALWAYS -> Unit
         }
     }
 

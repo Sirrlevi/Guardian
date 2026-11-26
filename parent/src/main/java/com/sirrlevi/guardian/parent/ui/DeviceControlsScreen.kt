@@ -205,7 +205,7 @@ private fun ControlsHonestyNote() {
 }
 
 @Composable
-private fun StatusLine(row: StatusRow) {
+internal fun StatusLine(row: StatusRow) {
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.Top) {
         Text(row.label, Modifier.width(132.dp), style = MaterialTheme.typography.bodySmall, color = gColors.muted)
         val tint: Color = when (row.tone) {

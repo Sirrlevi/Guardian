@@ -4,11 +4,13 @@ import com.sirrlevi.guardian.core.ControlAck
 import com.sirrlevi.guardian.core.ControlCommand
 import com.sirrlevi.guardian.core.ControlCommandCodec
 import com.sirrlevi.guardian.core.ControlEvent
+import com.sirrlevi.guardian.core.ControlOffer
 import com.sirrlevi.guardian.core.ControlPolicy
 import com.sirrlevi.guardian.core.ControlResult
 import com.sirrlevi.guardian.core.ControlStatus
 import com.sirrlevi.guardian.core.ControlTexts
 import com.sirrlevi.guardian.core.ControlType
+import com.sirrlevi.guardian.core.RecoveryTexts
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -45,7 +47,8 @@ class DeviceControlModelTest {
     private var time = 1_800_000_000_000L
     private val backend = FakeControlBackend()
     private var counter = 0
-    private val model = DeviceControlModel({ backend }, { time }, { "ctl-" + (++counter).toString().padStart(8, '0') }, io = EmptyCoroutineContext)
+    private var gate = ControlOffer.Option(true, "")
+    private val model = DeviceControlModel({ backend }, { time }, { "ctl-" + (++counter).toString().padStart(8, '0') }, locateGate = { gate }, io = EmptyCoroutineContext)
 
     private fun capable(admin: Boolean = true, owner: Boolean = true, pending: Boolean = false) =
         ControlStatus(time, admin, owner, admin, owner, false, true, time - 3_600_000L, pending)
@@ -286,5 +289,114 @@ class DeviceControlModelTest {
         model.tick()
         assertNull(model.waiting)
     }
-}
 
+    // ---------------------------------------------------------------- ring and find now
+
+    private fun ringStatus(canRing: Boolean = true, ringUntil: Long = 0L) =
+        ControlStatus(time, true, false, true, false, false, true, time - 3_600_000L, false, canRing = canRing, ringUntil = ringUntil)
+
+    @Test fun ringIsOfferedOnlyWhenThePhoneCanShowItsNotice() = runBlocking {
+        backend.statusNow = ringStatus(canRing = false)
+        model.tick()
+        assertFalse(model.ringOffer.available)
+        assertEquals(RecoveryTexts.RING_UNAVAILABLE, model.ringOffer.why)
+        assertFalse(model.ring())
+        assertTrue(backend.sent.isEmpty())
+        backend.statusNow = ringStatus()
+        model.tick()
+        assertTrue(model.ringOffer.available)
+    }
+
+    @Test fun ringIsDoneOnlyWhenThePhoneConfirmsTheSoundStarted() = runBlocking {
+        backend.statusNow = ringStatus()
+        model.tick()
+        assertTrue(model.ring())
+        val cmd = backend.sent.single()
+        assertEquals(ControlType.RING, cmd.type)
+        assertEquals(ControlType.RING, model.waiting)
+        assertFalse("nothing is claimed before the phone answers", model.notice!!.contains("is ringing"))
+        backend.acks[cmd.id] = ack(cmd.id, "ring", ControlResult.DONE, RecoveryTexts.RING_STARTED)
+        model.tick()
+        assertNull(model.waiting)
+        assertEquals(RecoveryTexts.RING_STARTED, model.notice)
+        assertFalse(model.noticeIsProblem)
+    }
+
+    @Test fun aRingThePhoneRefusedOrCouldNotStartIsAProblem() = runBlocking {
+        backend.statusNow = ringStatus()
+        model.tick()
+        model.ring()
+        var id = backend.sent.last().id
+        backend.acks[id] = ack(id, "ring", ControlResult.REJECTED, RecoveryTexts.RING_UNAVAILABLE)
+        model.tick()
+        assertEquals(RecoveryTexts.RING_UNAVAILABLE, model.notice)
+        assertTrue(model.noticeIsProblem)
+        model.ring()
+        id = backend.sent.last().id
+        backend.acks[id] = ack(id, "ring", ControlResult.FAILED, RecoveryTexts.RING_FAILED)
+        model.tick()
+        assertEquals(RecoveryTexts.RING_FAILED, model.notice)
+        assertTrue(model.noticeIsProblem)
+    }
+
+    @Test fun anUnansweredRingIsTakenBackSoItCannotRingLater() = runBlocking {
+        backend.statusNow = ringStatus()
+        model.tick()
+        model.ring()
+        val id = backend.sent.single().id
+        time += ControlPolicy.TTL_MS + ControlPolicy.CLOCK_SKEW_MS + ControlPolicy.ACK_GRACE_MS + 1_000L
+        model.tick()
+        assertEquals(listOf(id), backend.withdrawn)
+        assertTrue(model.notice!!.contains("nothing was done"))
+        assertTrue(model.noticeIsProblem)
+    }
+
+    @Test fun ringingIsShownOnlyWhileTheFreshReportSaysSo() = runBlocking {
+        backend.statusNow = ringStatus(ringUntil = time + 30_000L)
+        model.tick()
+        assertTrue(model.ringing)
+        time += 31_000L
+        backend.statusNow = ringStatus(ringUntil = 0L).copy(ts = time)
+        model.tick()
+        assertFalse(model.ringing)
+    }
+
+    @Test fun findNowIsGatedByWhatThePhoneSaidAboutLocation() = runBlocking {
+        backend.statusNow = ringStatus()
+        model.tick()
+        gate = ControlOffer.Option(false, RecoveryTexts.NO_PERMISSION)
+        assertFalse(model.locateOffer.available)
+        assertFalse(model.locate())
+        assertEquals(RecoveryTexts.NO_PERMISSION, model.notice)
+        assertTrue(model.noticeIsProblem)
+        assertTrue(backend.sent.isEmpty())
+    }
+
+    @Test fun findNowIsDoneOnlyWithAFreshPositionAndFailsHonestly() = runBlocking {
+        backend.statusNow = ringStatus()
+        model.tick()
+        assertTrue(model.locate())
+        var id = backend.sent.last().id
+        assertEquals(ControlType.LOCATE, backend.sent.last().type)
+        assertEquals(ControlType.LOCATE, model.waiting)
+        backend.acks[id] = ack(id, "locate", ControlResult.FAILED, RecoveryTexts.NO_FIX)
+        model.tick()
+        assertEquals(RecoveryTexts.NO_FIX, model.notice)
+        assertTrue(model.noticeIsProblem)
+        model.locate()
+        id = backend.sent.last().id
+        backend.acks[id] = ack(id, "locate", ControlResult.DONE, RecoveryTexts.LOCATED)
+        model.tick()
+        assertEquals(RecoveryTexts.LOCATED, model.notice)
+        assertFalse(model.noticeIsProblem)
+    }
+
+    @Test fun oneRequestAtATimeAlsoCoversRingAndFindNow() = runBlocking {
+        backend.statusNow = ringStatus()
+        model.tick()
+        assertTrue(model.ring())
+        assertFalse(model.locate())
+        assertFalse(model.lock())
+        assertEquals(1, backend.sent.size)
+    }
+}

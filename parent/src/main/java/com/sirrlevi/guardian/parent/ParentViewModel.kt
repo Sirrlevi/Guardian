@@ -95,8 +95,16 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     @androidx.annotation.VisibleForTesting
     internal var previewBackendForTest: PreviewBackend? = null
 
-    /** Lock now, restart and the phone's real status. Polls only while its screen is open. */
-    val controls = DeviceControlModel(backend = { controlBackendForTest ?: RepoControlBackend(repo, { session }, { session = it }, { device?.id }) })
+    /** Find my phone: the location settings and the real positions the phone saved. Polls only while its screen is open. */
+    val recovery = RecoveryModel(backend = { recoveryBackendForTest ?: RepoRecoveryBackend(repo, { session }, { session = it }, { device?.id }) })
+    @androidx.annotation.VisibleForTesting
+    internal var recoveryBackendForTest: RecoveryBackend? = null
+
+    /** Lock now, restart, ring, find now and the phone's real status. Polls only while its screen is open. */
+    val controls = DeviceControlModel(
+        backend = { controlBackendForTest ?: RepoControlBackend(repo, { session }, { session = it }, { device?.id }) },
+        locateGate = { recovery.locateOffer }
+    )
     @androidx.annotation.VisibleForTesting
     internal var controlBackendForTest: ControlBackend? = null
 
@@ -226,6 +234,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         stopRealtime()
         preview.reset()
         controls.reset()
+        recovery.reset()
         repo.clearSession()
         session = null
         devices = emptyList()
@@ -246,6 +255,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         resetMedia()
         preview.reset()
         controls.reset()
+        recovery.reset()
         stopRealtime()
         startRealtime()
         refreshAll(silent = false)
@@ -584,6 +594,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     fun onForeground() {
         preview.foreground = true
         controls.foreground = true
+        recovery.foreground = true
         if (session == null) return
         startRealtime()
         pollJob?.cancel()
@@ -599,6 +610,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     fun onBackground() {
         preview.foreground = false
         controls.foreground = false
+        recovery.foreground = false
         pollJob?.cancel()
         stopRealtime()
     }

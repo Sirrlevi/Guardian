@@ -25,6 +25,13 @@ import com.sirrlevi.guardian.core.ControlCommandCodec
 import com.sirrlevi.guardian.core.ControlEvent
 import com.sirrlevi.guardian.core.ControlEventCodec
 import com.sirrlevi.guardian.core.ControlStatus
+import com.sirrlevi.guardian.core.LocationPoint
+import com.sirrlevi.guardian.core.LocationPointCodec
+import com.sirrlevi.guardian.core.RecoveryPolicy
+import com.sirrlevi.guardian.core.RecoverySettings
+import com.sirrlevi.guardian.core.RecoverySettingsCodec
+import com.sirrlevi.guardian.core.RecoveryState
+import com.sirrlevi.guardian.core.RecoveryStateCodec
 import com.sirrlevi.guardian.core.ControlStatusCodec
 import com.sirrlevi.guardian.core.CaptureStateCodec
 import com.sirrlevi.guardian.core.LiveCodec
@@ -207,6 +214,33 @@ class ParentRepository(context: Context) {
     fun fetchControlLog(session: GuardianSession, deviceId: String): List<ControlEvent> {
         val node = api.get(GuardianPaths.controlLog(session.uid, deviceId), session).obj() ?: return emptyList()
         return node.entrySet().sortedByDescending { it.key }.mapNotNull { (_, v) -> v.takeIf { it.isJsonObject }?.let { ControlEventCodec.fromJson(it.asJsonObject) } }
+    }
+
+    // ------------------------------------------------------------ device recovery (location sharing)
+
+    fun fetchRecoverySettings(session: GuardianSession, deviceId: String): RecoverySettings? =
+        RecoverySettingsCodec.fromJson(api.get(GuardianPaths.recoverySettings(session.uid, deviceId), session).obj())
+
+    fun saveRecoverySettings(session: GuardianSession, deviceId: String, settings: RecoverySettings) =
+        api.put(GuardianPaths.recoverySettings(session.uid, deviceId), RecoverySettingsCodec.toJson(settings), session)
+
+    fun fetchRecoveryState(session: GuardianSession, deviceId: String): RecoveryState? =
+        RecoveryStateCodec.fromJson(api.get(GuardianPaths.recoveryState(session.uid, deviceId), session).obj())
+
+    fun fetchRecoveryLast(session: GuardianSession, deviceId: String): LocationPoint? =
+        LocationPointCodec.fromJson(api.get(GuardianPaths.recoveryLast(session.uid, deviceId), session).obj())
+
+    /** The newest [limit] positions, newest first. Damaged entries are skipped, never shown. */
+    fun fetchRecoveryHistory(session: GuardianSession, deviceId: String, limit: Int): List<LocationPoint> {
+        val node = api.get(GuardianPaths.recoveryHistory(session.uid, deviceId), session, "orderBy=\"\$key\"&limitToLast=" + limit.coerceIn(1, RecoveryPolicy.MAX_POINTS)).obj()
+            ?: return emptyList()
+        return node.entrySet().mapNotNull { (_, v) -> LocationPointCodec.fromJson(v.obj()) }.sortedByDescending { it.ts }
+    }
+
+    /** Deletes every saved position, including the newest one. */
+    fun clearRecoveryHistory(session: GuardianSession, deviceId: String) {
+        api.delete(GuardianPaths.recoveryHistory(session.uid, deviceId), session)
+        api.delete(GuardianPaths.recoveryLast(session.uid, deviceId), session)
     }
 
     class DeviceMeta(val id: String, val name: String, val manufacturer: String, val lastSeen: Long)

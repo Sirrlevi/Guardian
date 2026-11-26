@@ -308,7 +308,7 @@ private fun ScreenTimeCard(vm: ChildViewModel) {
 // ------------------------------------------------------------------ protection
 
 private fun emojiFor(id: String): String = when (id) {
-    "usage" -> "📊"; "overlay" -> "🪟"; "battery" -> "🔋"; "notifications" -> "🔔"; "admin" -> "🔒"; "vpn" -> "🌐"; "notifaccess" -> "💬"; "media" -> "🖼️"; else -> "✅"
+    "usage" -> "📊"; "overlay" -> "🪟"; "battery" -> "🔋"; "notifications" -> "🔔"; "admin" -> "🔒"; "vpn" -> "🌐"; "notifaccess" -> "💬"; "media" -> "🖼️"; "location" -> "📍"; else -> "✅"
 }
 
 @Composable
@@ -359,7 +359,7 @@ fun ProtectionScreen(vm: ChildViewModel, padding: PaddingValues, actions: ChildA
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(p.title, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall, color = kc.text)
                             Spacer(Modifier.width(8.dp))
-                            if (p.granted) KPill("On", kc.good) else KPill(if (p.required) "Required" else if (p.id == "notifaccess" || p.id == "media") "Optional" else "Recommended", if (p.required) kc.coral else kc.sun)
+                            if (p.granted) KPill("On", kc.good) else KPill(if (p.required) "Required" else if (p.id == "notifaccess" || p.id == "media" || p.id == "location") "Optional" else "Recommended", if (p.required) kc.coral else kc.sun)
                         }
                         Text(p.why, style = MaterialTheme.typography.bodySmall, color = kc.muted)
                     }
@@ -389,6 +389,20 @@ fun ProtectionScreen(vm: ChildViewModel, padding: PaddingValues, actions: ChildA
             }
         }
         item { CaptureStatusCard(capture, onAllow = actions.startCapture, onDecline = actions.declineCapture, onStop = actions.stopCapture) }
+        item {
+            KCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    KEmoji("📍", bg = kc.sky.copy(alpha = 0.16f))
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Find my phone", style = MaterialTheme.typography.titleSmall, color = kc.text)
+                        Text(com.sirrlevi.guardian.core.RecoveryChildText.location(vm.recovery), style = MaterialTheme.typography.bodySmall, color = kc.muted)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(com.sirrlevi.guardian.core.RecoveryChildText.WHAT_PARENT_CAN_DO, style = MaterialTheme.typography.bodySmall, color = kc.muted)
+            }
+        }
         vm.mediaStatus?.let { m ->
             item {
                 KCard {

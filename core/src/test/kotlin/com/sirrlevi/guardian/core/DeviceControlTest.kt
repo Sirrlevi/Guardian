@@ -72,6 +72,18 @@ private class ControlFakeHost : ControlHost {
     }
     override fun reboot() { rebootCalls++; rebootThrows?.let { throw it } }
     override fun bootAt() = boot
+    var ringable = true
+    var ringOutcome = ControlOutcome(ControlResult.DONE, RecoveryTexts.RING_STARTED)
+    var ringThrows: Exception? = null
+    var ringCalls = 0
+    var ringEnds = 0L
+    var locateOutcome = ControlOutcome(ControlResult.DONE, RecoveryTexts.LOCATED)
+    var locateThrows: Exception? = null
+    var locateCalls = 0
+    override fun canRing() = ringable
+    override fun ring(): ControlOutcome { ringCalls++; ringThrows?.let { throw it }; return ringOutcome }
+    override fun ringUntil() = ringEnds
+    override fun locate(): ControlOutcome { locateCalls++; locateThrows?.let { throw it }; return locateOutcome }
     override fun pendingReboot() = pending
     override fun setPendingReboot(pending: PendingReboot?) { this.pending = pending }
     override fun sleep(ms: Long) {
@@ -363,6 +375,131 @@ class DeviceControlTest {
         processor.poll()
         assertEquals(listOf(ControlResult.REJECTED), store.events.map { it.result })
         assertEquals("cmd-0001-abcdef", store.events.single().id)
+    }
+
+    // ---------------------------------------------------------------- ring and locate
+
+    @Test fun ringIsDoneOnlyAfterThePhoneReallyStartedTheSoundAndTheNotice() {
+        request(ControlType.RING)
+        processor.poll()
+        val ack = store.acks.getValue("cmd-0001-abcdef")
+        assertEquals(ControlResult.DONE, ack.result)
+        assertEquals(RecoveryTexts.RING_STARTED, ack.reason)
+        assertEquals(1, host.ringCalls)
+    }
+
+    @Test fun ringIsRefusedWithAReasonWhenThePhoneCannotShowItsNotice() {
+        host.ringable = false
+        request(ControlType.RING)
+        processor.poll()
+        val ack = store.acks.getValue("cmd-0001-abcdef")
+        assertEquals(ControlResult.REJECTED, ack.result)
+        assertEquals(RecoveryTexts.RING_UNAVAILABLE, ack.reason)
+        assertEquals("the phone must never ring without its notice", 0, host.ringCalls)
+    }
+
+    @Test fun aRingThatCouldNotStartIsReportedAsFailedNotAsDone() {
+        host.ringOutcome = ControlOutcome(ControlResult.FAILED, RecoveryTexts.RING_FAILED)
+        request(ControlType.RING)
+        processor.poll()
+        assertEquals(ControlResult.FAILED, store.acks.getValue("cmd-0001-abcdef").result)
+    }
+
+    @Test fun aCrashWhileRingingBecomesAnHonestFailure() {
+        host.ringThrows = IllegalStateException("audio service died")
+        request(ControlType.RING)
+        processor.poll()
+        val ack = store.acks.getValue("cmd-0001-abcdef")
+        assertEquals(ControlResult.FAILED, ack.result)
+        assertEquals(RecoveryTexts.RING_FAILED, ack.reason)
+    }
+
+    @Test fun anExpiredRingIsNeverPlayed() {
+        host.time += ControlPolicy.TTL_MS + ControlPolicy.CLOCK_SKEW_MS + 1_000L
+        store.inbox.add(ControlCommand("cmd-0001-abcdef", ControlType.RING.code, host.time - ControlPolicy.TTL_MS - ControlPolicy.CLOCK_SKEW_MS - 5_000L, host.time - ControlPolicy.CLOCK_SKEW_MS - 5_000L))
+        processor.poll()
+        assertEquals(ControlResult.EXPIRED, store.acks.getValue("cmd-0001-abcdef").result)
+        assertEquals(0, host.ringCalls)
+    }
+
+    @Test fun aRingIsHandledAtMostOnce() {
+        val c = request(ControlType.RING)
+        processor.poll()
+        store.inbox.add(c)
+        processor.poll()
+        assertEquals(1, host.ringCalls)
+    }
+
+    @Test fun locateAnswersWithWhatThePhoneReallyFound() {
+        request(ControlType.LOCATE)
+        processor.poll()
+        assertEquals(ControlResult.DONE, store.acks.getValue("cmd-0001-abcdef").result)
+        assertEquals(1, host.locateCalls)
+
+        store.acks.clear()
+        host.locateOutcome = ControlOutcome(ControlResult.FAILED, RecoveryTexts.NO_FIX)
+        request(ControlType.LOCATE, "cmd-0002-abcdef")
+        processor.poll()
+        val failed = store.acks.getValue("cmd-0002-abcdef")
+        assertEquals(ControlResult.FAILED, failed.result)
+        assertEquals(RecoveryTexts.NO_FIX, failed.reason)
+    }
+
+    @Test fun locateRefusedBecauseSharingIsOffKeepsTheReason() {
+        host.locateOutcome = ControlOutcome(ControlResult.REJECTED, RecoveryTexts.OFF)
+        request(ControlType.LOCATE)
+        processor.poll()
+        val ack = store.acks.getValue("cmd-0001-abcdef")
+        assertEquals(ControlResult.REJECTED, ack.result)
+        assertEquals(RecoveryTexts.OFF, ack.reason)
+    }
+
+    @Test fun aMissingPermissionDuringLocateIsARefusalWithTheAndroidReason() {
+        host.locateThrows = SecurityException("no location permission")
+        request(ControlType.LOCATE)
+        processor.poll()
+        val ack = store.acks.getValue("cmd-0001-abcdef")
+        assertEquals(ControlResult.REJECTED, ack.result)
+        assertTrue(ack.reason.contains("no location permission"))
+    }
+
+    @Test fun ringAndLocateLeaveAnAuditLine() {
+        request(ControlType.RING)
+        request(ControlType.LOCATE, "cmd-0002-abcdef")
+        processor.poll()
+        assertEquals(listOf("ring", "locate"), store.events.map { it.typeCode })
+    }
+
+    @Test fun statusReportsRingingOnlyWhileItReallyIs() {
+        host.ringEnds = host.time + 30_000L
+        processor.reportStatus()
+        val status = store.statuses.last()
+        assertTrue(status.canRing)
+        assertEquals(host.ringEnds, status.ringUntil)
+        assertTrue(ControlOffer.isRinging(status, host.time))
+        assertFalse("a ring that has ended is not shown as ringing", ControlOffer.isRinging(status, host.time + 31_000L))
+        host.ringEnds = host.time + 10 * 60_000L
+        processor.reportStatus()
+        val longRing = store.statuses.last()
+        assertTrue(ControlOffer.isRinging(longRing, host.time + 1_000L))
+        assertFalse("a report that has gone stale is not trusted", ControlOffer.isRinging(longRing, host.time + ControlPolicy.STATUS_STALE_MS + 1_000L))
+    }
+
+    @Test fun ringIsOfferedOnlyWhenThePhoneCanDoIt() {
+        assertFalse(ControlOffer.ring(null).available)
+        host.ringable = false
+        processor.reportStatus()
+        assertEquals(RecoveryTexts.RING_UNAVAILABLE, ControlOffer.ring(store.statuses.last()).why)
+        host.ringable = true
+        processor.reportStatus()
+        assertTrue(ControlOffer.ring(store.statuses.last()).available)
+    }
+
+    @Test fun anOlderPhoneReportWithoutRingFieldsStillReadsAndMeansCannotRing() {
+        val old = JsonObject().apply { addProperty("ts", 5L); addProperty("admin", true); addProperty("lock", true) }
+        val status = ControlStatusCodec.fromJson(old)!!
+        assertFalse(status.canRing)
+        assertEquals(0L, status.ringUntil)
     }
 
     // ---------------------------------------------------------------- status and offers

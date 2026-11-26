@@ -52,6 +52,8 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
     var permissions by mutableStateOf<List<ChildPermissions.Item>>(emptyList()); private set
     var mediaStatus by mutableStateOf<com.sirrlevi.guardian.core.MediaStatusSnapshot?>(null); private set
     var monitorRunning by mutableStateOf(false); private set
+    /** What Find my phone is doing on this phone, so the child can always see it. */
+    var recovery by mutableStateOf(com.sirrlevi.guardian.core.RecoveryLocalView(null, com.sirrlevi.guardian.core.LocationPermission.NONE, true)); private set
     var canEnforce by mutableStateOf(false); private set
     var isDeviceOwner by mutableStateOf(false); private set
     var lastSync by mutableLongStateOf(0L); private set
@@ -220,6 +222,8 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshLocal() {
         permissions = ChildPermissions.items(app)
         mediaStatus = MediaBackupState(app).localStatus(app)
+        val location = AndroidLocationSource(app)
+        recovery = com.sirrlevi.guardian.core.RecoveryLocalView(ControlRuntime.recoverySettings(), location.permission(), location.servicesOn())
         monitorRunning = GuardianMonitorService.running
         canEnforce = ChildPermissions.canEnforce(app)
         isDeviceOwner = ChildPermissions.isDeviceOwner(app)

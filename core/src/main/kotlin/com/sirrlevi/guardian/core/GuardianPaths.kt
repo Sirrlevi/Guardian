@@ -59,4 +59,15 @@ object GuardianPaths {
     fun controlAck(familyId: String, deviceId: String, id: String) = controlAcks(familyId, deviceId) + "/" + id
     /** The phone's short history of requests it handled. */
     fun controlLog(familyId: String, deviceId: String) = control(familyId, deviceId) + "/log"
+
+    // ---- device recovery (location, ring)
+    fun recovery(familyId: String, deviceId: String) = device(familyId, deviceId) + "/recovery"
+    /** Written by the parent: whether location is shared, how often, and how long history is kept. */
+    fun recoverySettings(familyId: String, deviceId: String) = recovery(familyId, deviceId) + "/settings"
+    /** Written by the child: which location permission it has and when it last read a position. */
+    fun recoveryState(familyId: String, deviceId: String) = recovery(familyId, deviceId) + "/state"
+    /** Written by the child: the newest real position. */
+    fun recoveryLast(familyId: String, deviceId: String) = recovery(familyId, deviceId) + "/last"
+    fun recoveryHistory(familyId: String, deviceId: String) = recovery(familyId, deviceId) + "/history"
+    fun recoveryPoint(familyId: String, deviceId: String, key: String) = recoveryHistory(familyId, deviceId) + "/" + key
 }

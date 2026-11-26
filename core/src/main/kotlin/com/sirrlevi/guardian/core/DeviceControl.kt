@@ -40,7 +40,11 @@ object ControlPolicy {
 }
 
 enum class ControlType(val code: String) {
-    LOCK("lock"), REBOOT("reboot");
+    LOCK("lock"), REBOOT("reboot"),
+    /** Plays the alarm sound with a visible notice on the phone. */
+    RING("ring"),
+    /** Reads a fresh position, only when location sharing is on. */
+    LOCATE("locate");
 
     companion object {
         fun fromCode(code: String?): ControlType? = values().firstOrNull { it.code == code }
@@ -61,6 +65,9 @@ enum class ControlResult(val code: String) {
         fun fromCode(code: String?): ControlResult? = values().firstOrNull { it.code == code }
     }
 }
+
+/** What a phone did with a request: its answer and, in words, why. */
+class ControlOutcome(val result: ControlResult, val reason: String)
 
 /** Every sentence that explains an outcome or a limit, shared by both apps so they always say the same thing. */
 object ControlTexts {
@@ -196,7 +203,11 @@ data class ControlStatus(
     val screenOn: Boolean,
     /** When the phone last started, on its own clock (0 when unknown). */
     val bootAt: Long,
-    val rebootPending: Boolean
+    val rebootPending: Boolean,
+    /** True when the phone can ring (it can show the notice that goes with it). */
+    val canRing: Boolean = false,
+    /** While the phone is ringing: when it stops (0 when it isn't ringing). */
+    val ringUntil: Long = 0L
 )
 
 object ControlStatusCodec {
@@ -210,6 +221,8 @@ object ControlStatusCodec {
         addProperty("screen", s.screenOn)
         addProperty("boot", s.bootAt)
         addProperty("pending", s.rebootPending)
+        addProperty("ring", s.canRing)
+        addProperty("ringUntil", s.ringUntil)
     }
 
     fun fromJson(o: JsonObject?): ControlStatus? {
@@ -219,7 +232,8 @@ object ControlStatusCodec {
             ControlStatus(
                 ts = o.get("ts")?.asLong ?: return null,
                 adminActive = flag("admin"), deviceOwner = flag("owner"), canLock = flag("lock"), canReboot = flag("reboot"),
-                locked = flag("locked"), screenOn = flag("screen"), bootAt = o.get("boot")?.asLong ?: 0L, rebootPending = flag("pending")
+                locked = flag("locked"), screenOn = flag("screen"), bootAt = o.get("boot")?.asLong ?: 0L, rebootPending = flag("pending"),
+                canRing = flag("ring"), ringUntil = o.get("ringUntil")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L
             )
         } catch (_: Exception) { null }
     }
@@ -261,6 +275,15 @@ object ControlOffer {
         else -> Option(true, "")
     }
 
+    fun ring(status: ControlStatus?): Option = when {
+        status == null -> Option(false, ControlTexts.NO_REPORT)
+        !status.canRing -> Option(false, RecoveryTexts.RING_UNAVAILABLE)
+        else -> Option(true, "")
+    }
+
+    /** True while the phone says it is ringing and its report is fresh enough to believe it. */
+    fun isRinging(status: ControlStatus?, now: Long): Boolean = status != null && status.ringUntil > now && !isStale(status, now)
+
     fun isStale(status: ControlStatus?, now: Long): Boolean = status == null || now - status.ts > ControlPolicy.STATUS_STALE_MS
 }
 
@@ -291,6 +314,14 @@ interface ControlHost {
     fun reboot()
     /** When the phone last started, on its own clock. */
     fun bootAt(): Long
+    /** True when the phone can ring together with the visible notice that must go with it. */
+    fun canRing(): Boolean
+    /** Starts the alarm sound and the notice, and reports what really happened. Never rings without the notice. */
+    fun ring(): ControlOutcome
+    /** While ringing: when it stops, otherwise 0. */
+    fun ringUntil(): Long
+    /** Reads a fresh position (only when location sharing is on and allowed) and saves it for the parent. May take up to [RecoveryPolicy.LOCATE_TIMEOUT_MS]. */
+    fun locate(): ControlOutcome
     fun pendingReboot(): PendingReboot?
     fun setPendingReboot(pending: PendingReboot?)
     fun sleep(ms: Long)
@@ -326,6 +357,8 @@ class ControlProcessor(
             when (c.type) {
                 ControlType.LOCK -> { lock(c); answered++ }
                 ControlType.REBOOT -> { if (reboot(c)) answered++ }
+                ControlType.RING -> { ring(c); answered++ }
+                ControlType.LOCATE -> { locate(c); answered++ }
                 null -> { conclude(c, ControlResult.REJECTED, ControlTexts.UNSUPPORTED); answered++ }
             }
         }
@@ -340,7 +373,8 @@ class ControlProcessor(
             ControlStatus(
                 ts = host.now(), adminActive = admin, deviceOwner = owner,
                 canLock = ControlCapabilities.canLock(admin), canReboot = ControlCapabilities.canReboot(owner, host.sdk()),
-                locked = host.isLocked(), screenOn = host.screenOn(), bootAt = host.bootAt(), rebootPending = host.pendingReboot() != null
+                locked = host.isLocked(), screenOn = host.screenOn(), bootAt = host.bootAt(), rebootPending = host.pendingReboot() != null,
+                canRing = host.canRing(), ringUntil = host.ringUntil()
             )
         )
     }
@@ -383,6 +417,25 @@ class ControlProcessor(
         }
         if (host.isLocked()) conclude(c, ControlResult.DONE, ControlTexts.LOCKED)
         else conclude(c, ControlResult.FAILED, ControlTexts.LOCK_FAILED)
+    }
+
+    private fun ring(c: ControlCommand) {
+        if (!host.canRing()) { conclude(c, ControlResult.REJECTED, RecoveryTexts.RING_UNAVAILABLE); return }
+        conclude(c, safely("ring", RecoveryTexts.RING_FAILED) { host.ring() })
+    }
+
+    private fun locate(c: ControlCommand) {
+        conclude(c, safely("locate", RecoveryTexts.LOCATE_FAILED) { host.locate() })
+    }
+
+    /** A phone-side failure becomes an honest "failed" answer instead of a crash or silence. */
+    private fun safely(what: String, failure: String, block: () -> ControlOutcome): ControlOutcome = try {
+        block()
+    } catch (e: SecurityException) {
+        ControlOutcome(ControlResult.REJECTED, "Android refused: " + (e.message?.take(80) ?: "permission missing") + ".")
+    } catch (e: Exception) {
+        log("$what failed", e)
+        ControlOutcome(ControlResult.FAILED, failure)
     }
 
     /** Returns true when the request was answered (accepted or refused). */
@@ -430,6 +483,8 @@ class ControlProcessor(
             log("could not settle ${c.id}", e)
         }
     }
+
+    private fun conclude(c: ControlCommand, outcome: ControlOutcome) = conclude(c, outcome.result, outcome.reason)
 
     private fun conclude(c: ControlCommand, result: ControlResult, reason: String) {
         remember(c.id)

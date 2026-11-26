@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 /** Hand-drawn 24×24 line icons, so the app needs no icon library. */
 enum class GIcon {
     Home, Apps, Activity, Chart, Settings, Block, Timer, Globe, Battery, Wifi, Search, Close, Check,
-    Chevron, Back, Plus, Bell, Download, Shield, Refresh, Lock, Phone, Trash, Pause, Warning, Person, Moon, Play, Link, Chat, Dots, Photo, Screen
+    Chevron, Back, Plus, Bell, Download, Shield, Refresh, Lock, Phone, Trash, Pause, Warning, Person, Moon, Play, Link, Chat, Dots, Photo, Screen, Pin
 }
 
 @Composable
@@ -92,6 +92,17 @@ private fun DrawScope.drawGIcon(icon: GIcon, c: Color, u: Float, stroke: Stroke)
         GIcon.Chat -> { box(3f, 4f, 18f, 12.5f, 3.5f); poly(8f, 16.5f, 8f, 20.5f, 12.5f, 16.5f) }
         GIcon.Dots -> { dot(6f, 12f, 1.7f); dot(12f, 12f, 1.7f); dot(18f, 12f, 1.7f) }
         GIcon.Screen -> { box(3f, 4f, 18f, 12f, 2.5f); line(9f, 20f, 15f, 20f); line(12f, 16f, 12f, 20f) }
+        GIcon.Pin -> {
+            val p = Path()
+            p.moveTo(12f * u, 21f * u)
+            p.cubicTo(6.5f * u, 15f * u, 5f * u, 12.5f * u, 5f * u, 9.5f * u)
+            p.cubicTo(5f * u, 5.9f * u, 8.1f * u, 3f * u, 12f * u, 3f * u)
+            p.cubicTo(15.9f * u, 3f * u, 19f * u, 5.9f * u, 19f * u, 9.5f * u)
+            p.cubicTo(19f * u, 12.5f * u, 17.5f * u, 15f * u, 12f * u, 21f * u)
+            p.close()
+            drawPath(p, c, style = stroke)
+            ring(12f, 9.5f, 2.6f)
+        }
         GIcon.Photo -> { box(3f, 4.5f, 18f, 15f, 3f); dot(9f, 10f, 1.4f); poly(4f, 18f, 9.5f, 13.5f, 13f, 16.5f, 16f, 13.5f, 20f, 17.5f) }
     }
 }
