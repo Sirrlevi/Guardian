@@ -55,6 +55,12 @@ import com.sirrlevi.guardian.core.GuardianApi
 import com.sirrlevi.guardian.core.GuardianPaths
 import com.sirrlevi.guardian.core.GuardianSession
 import com.sirrlevi.guardian.core.PkgKey
+import com.sirrlevi.guardian.core.PermissionWatch
+import com.sirrlevi.guardian.core.SafetyAlert
+import com.sirrlevi.guardian.core.SafetyAlertCodec
+import com.sirrlevi.guardian.core.SafetyIds
+import com.sirrlevi.guardian.core.SafetySettings
+import com.sirrlevi.guardian.core.SafetySettingsCodec
 import com.sirrlevi.guardian.core.PolicyCodec
 import com.sirrlevi.guardian.core.arrayOrNull
 import com.sirrlevi.guardian.core.boolOrFalse
@@ -261,6 +267,49 @@ class ParentRepository(context: Context) {
     }
 
     class DeviceMeta(val id: String, val name: String, val manufacturer: String, val lastSeen: Long)
+
+    // ------------------------------------------------------------ safety alerts (settings, dismissals, alerts seen once)
+
+    fun fetchSafetySettings(session: GuardianSession, deviceId: String): SafetySettings =
+        SafetySettingsCodec.fromJson(api.get(GuardianPaths.safetySettings(session.uid, deviceId), session).obj())
+
+    fun saveSafetySettings(session: GuardianSession, deviceId: String, settings: SafetySettings) =
+        api.put(GuardianPaths.safetySettings(session.uid, deviceId), SafetySettingsCodec.toJson(settings), session)
+
+    /** Alert id to when it was dismissed. */
+    fun fetchSafetyDismissed(session: GuardianSession, deviceId: String): Map<String, Long> {
+        val node = api.get(GuardianPaths.safetyDismissed(session.uid, deviceId), session).obj() ?: return emptyMap()
+        val out = LinkedHashMap<String, Long>()
+        for ((k, v) in node.entrySet()) if (SafetyIds.isValid(k) && v.isJsonPrimitive) out[k] = try { v.asLong } catch (_: Exception) { 0L }
+        return out
+    }
+
+    fun dismissSafetyAlert(session: GuardianSession, deviceId: String, alertId: String, at: Long) =
+        api.put(GuardianPaths.safetyDismissal(session.uid, deviceId, alertId), com.google.gson.JsonPrimitive(at), session)
+
+    fun restoreSafetyAlert(session: GuardianSession, deviceId: String, alertId: String) =
+        api.delete(GuardianPaths.safetyDismissal(session.uid, deviceId, alertId), session)
+
+    fun fetchSafetyEvents(session: GuardianSession, deviceId: String): List<SafetyAlert> {
+        val node = api.get(GuardianPaths.safetyEvents(session.uid, deviceId), session).obj() ?: return emptyList()
+        return node.entrySet().mapNotNull { (k, v) -> SafetyAlertCodec.fromJson(k, v.obj()) }.sortedByDescending { it.ts }
+    }
+
+    fun saveSafetyEvent(session: GuardianSession, deviceId: String, alert: SafetyAlert) =
+        api.put(GuardianPaths.safetyEvent(session.uid, deviceId, alert.id), SafetyAlertCodec.toJson(alert), session)
+
+    fun deleteSafetyEvent(session: GuardianSession, deviceId: String, alertId: String) =
+        api.delete(GuardianPaths.safetyEvent(session.uid, deviceId, alertId), session)
+
+    fun fetchSafetyPerms(session: GuardianSession, deviceId: String): Map<String, Boolean>? {
+        val node = api.get(GuardianPaths.safetyPerms(session.uid, deviceId), session).obj() ?: return null
+        val out = LinkedHashMap<String, Boolean>()
+        for ((k, v) in node.entrySet()) if (k in PermissionWatch.NAMES && v.isJsonPrimitive && v.asJsonPrimitive.isBoolean) out[k] = v.asBoolean
+        return out
+    }
+
+    fun saveSafetyPerms(session: GuardianSession, deviceId: String, perms: Map<String, Boolean>) =
+        api.put(GuardianPaths.safetyPerms(session.uid, deviceId), JsonObject().also { o -> perms.forEach { (k, v) -> o.addProperty(k, v) } }, session)
 
     fun fetchDeviceList(session: GuardianSession): List<DeviceMeta> {
         val keys = api.get(GuardianPaths.devices(session.uid), session, "shallow=true").obj() ?: return emptyList()

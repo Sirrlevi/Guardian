@@ -66,6 +66,18 @@ object GuardianPaths {
     fun wallpaper(familyId: String, deviceId: String) = appearance(familyId, deviceId) + "/wallpaper"
     fun wallpaperBlob(familyId: String, deviceId: String) = appearance(familyId, deviceId) + "/wallpaperblob"
 
+    // ---- safety alerts (written and read by the Parent only)
+    fun safety(familyId: String, deviceId: String) = device(familyId, deviceId) + "/safety"
+    fun safetySettings(familyId: String, deviceId: String) = safety(familyId, deviceId) + "/settings"
+    /** Alerts the parent dismissed: alert id to the time it was dismissed. */
+    fun safetyDismissed(familyId: String, deviceId: String) = safety(familyId, deviceId) + "/dismissed"
+    fun safetyDismissal(familyId: String, deviceId: String, alertId: String) = safetyDismissed(familyId, deviceId) + "/" + alertId
+    /** Alerts that can only be noticed at one moment (permission changes) and so are kept once seen. */
+    fun safetyEvents(familyId: String, deviceId: String) = safety(familyId, deviceId) + "/events"
+    fun safetyEvent(familyId: String, deviceId: String, alertId: String) = safetyEvents(familyId, deviceId) + "/" + alertId
+    /** The permissions as last seen, to notice when one is switched off. */
+    fun safetyPerms(familyId: String, deviceId: String) = safety(familyId, deviceId) + "/perms"
+
     // ---- device recovery (location, ring)
     fun recovery(familyId: String, deviceId: String) = device(familyId, deviceId) + "/recovery"
     /** Written by the parent: whether location is shared, how often, and how long history is kept. */

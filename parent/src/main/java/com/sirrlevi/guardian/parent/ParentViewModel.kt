@@ -105,6 +105,11 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     @androidx.annotation.VisibleForTesting
     internal var appearanceBackendForTest: AppearanceBackend? = null
 
+    /** Safety alerts: rules over message previews, app use and the phone's own reports. Checked while its screen is open and now and then in the foreground. */
+    val safety = SafetyModel(backend = { safetyBackendForTest ?: RepoSafetyBackend(repo, { session }, { session = it }, { device }) })
+    @androidx.annotation.VisibleForTesting
+    internal var safetyBackendForTest: SafetyBackend? = null
+
     /** Lock now, restart, ring, find now and the phone's real status. Polls only while its screen is open. */
     val controls = DeviceControlModel(
         backend = { controlBackendForTest ?: RepoControlBackend(repo, { session }, { session = it }, { device?.id }) },
@@ -241,6 +246,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         controls.reset()
         recovery.reset()
         appearance.reset()
+        safety.reset()
         repo.clearSession()
         session = null
         devices = emptyList()
@@ -263,6 +269,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         controls.reset()
         recovery.reset()
         appearance.reset()
+        safety.reset()
         stopRealtime()
         startRealtime()
         refreshAll(silent = false)
@@ -603,6 +610,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         controls.foreground = true
         recovery.foreground = true
         appearance.foreground = true
+        safety.foreground = true
         if (session == null) return
         startRealtime()
         pollJob?.cancel()
@@ -610,6 +618,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
             while (isActive) {
                 delay(30_000L)
                 refreshAll(silent = true)
+                if (session != null && device != null) safety.checkIfDue()
             }
         }
         refreshAll(silent = true)
@@ -620,6 +629,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         controls.foreground = false
         recovery.foreground = false
         appearance.foreground = false
+        safety.foreground = false
         pollJob?.cancel()
         stopRealtime()
     }

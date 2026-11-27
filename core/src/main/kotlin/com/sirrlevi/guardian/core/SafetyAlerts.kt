@@ -445,9 +445,13 @@ object SafetyEvaluator {
  * are off now; the first time there is nothing to compare with, so nothing is claimed.
  */
 object PermissionWatch {
+    /**
+     * The permissions worth a "switched off" note. The web filter (VPN) and the battery exemption are left out on purpose: the first goes
+     * off whenever the parent turns the filter off, the second changes with ordinary battery settings, so both would only be noise.
+     */
     val NAMES = mapOf(
-        "usage" to "Usage access", "overlay" to "Display over other apps", "notifications" to "Notifications", "battery" to "Battery optimisation exemption",
-        "admin" to "Device administrator", "vpn" to "Web filter (VPN)", "notifaccess" to "Notification access"
+        "usage" to "Usage access", "overlay" to "Display over other apps", "notifications" to "Notifications",
+        "admin" to "Device administrator", "notifaccess" to "Notification access"
     )
 
     fun diff(previous: Map<String, Boolean>?, now: Map<String, Boolean>): List<String> {

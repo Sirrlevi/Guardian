@@ -34,6 +34,11 @@ fun MoreScreen(vm: ParentViewModel, padding: PaddingValues, open: (Tab) -> Unit)
             MoreItem(Tab.Appearance, GIcon.Photo, "Device appearance", "See the wallpaper your child chose to share. Android doesn't let apps read it, so they have to send it.")
         )),
         MoreSection("Insights", listOf(
+            MoreItem(
+                Tab.Safety, GIcon.Shield, "Safety alerts",
+                (if (vm.safety.active.isNotEmpty()) "${vm.safety.active.size} to review. " else "") +
+                    "Simple checks of message previews, app use and the phone's reports. They point out things worth a look; you decide."
+            ),
             MoreItem(Tab.Reports, GIcon.Chart, "Reports", "Weekly and monthly screen time, trends and top apps.")
         )),
         MoreSection("Optional tools", listOf(
