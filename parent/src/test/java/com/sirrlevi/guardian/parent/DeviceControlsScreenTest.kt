@@ -19,7 +19,7 @@ import com.sirrlevi.guardian.core.ControlType
 import com.sirrlevi.guardian.core.FamilyPolicy
 import com.sirrlevi.guardian.parent.ui.DeviceControlsScreen
 import com.sirrlevi.guardian.parent.ui.EraseConfirm
-import com.sirrlevi.guardian.parent.ui.EraseDialog
+import com.sirrlevi.guardian.parent.ui.EraseConfirmation
 import com.sirrlevi.guardian.parent.ui.GuardianTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -218,10 +218,10 @@ class DeviceControlsScreenTest {
         assertTrue(fake.sent.isEmpty())
     }
 
-    // The dialog is shown with the typed word passed in, rather than typed through a focused field in a dialog window: that combination
-    // never became idle under Robolectric. What the typing does is plain state, and what the word decides is `EraseConfirm`, tested below.
-    private fun showEraseDialog(typed: String, hasLock: Boolean, onContinue: () -> Unit = {}) {
-        rule.setContent { GuardianTheme(ThemeMode.Light) { EraseDialog("Aarav's phone", typed, {}, hasLock, onContinue, {}) } }
+    // The confirmation is shown with the typed word passed in. (A text field inside a dialog window never became idle under Robolectric,
+    // so the confirmation lives in the Erase card instead.) What the word decides is `EraseConfirm`, tested below.
+    private fun showConfirmation(typed: String, hasLock: Boolean, onContinue: () -> Unit = {}, onCancel: () -> Unit = {}) {
+        rule.setContent { GuardianTheme(ThemeMode.Light) { EraseConfirmation("Aarav's phone", typed, {}, hasLock, onContinue, onCancel) } }
         rule.waitForIdle()
     }
 
@@ -235,14 +235,14 @@ class DeviceControlsScreenTest {
     }
 
     @Test fun continueStaysDisabledUntilTheWordIsTypedExactly() {
-        showEraseDialog("erase", hasLock = true)
+        showConfirmation("erase", hasLock = true)
         assertTrue(has("Erase Aarav's phone?"))
         rule.onNodeWithText("Continue").assertIsNotEnabled()
     }
 
     @Test fun theExactWordEnablesContinueWhenThisPhoneHasAScreenLock() {
         var continued = 0
-        showEraseDialog("ERASE", hasLock = true) { continued++ }
+        showConfirmation("ERASE", hasLock = true) { continued++ }
         rule.onNodeWithText("Continue").assertIsEnabled()
         assertTrue(has("Next you'll be asked for this phone's screen lock", substring = true))
         assertEquals("nothing happens until Continue is pressed", 0, continued)
@@ -252,7 +252,7 @@ class DeviceControlsScreenTest {
 
     @Test fun withoutAScreenLockOnThisPhoneEraseCannotBeConfirmed() {
         var continued = 0
-        showEraseDialog("ERASE", hasLock = false) { continued++ }
+        showConfirmation("ERASE", hasLock = false) { continued++ }
         assertTrue(has("This phone has no screen lock", substring = true))
         rule.onNodeWithText("Continue").assertIsNotEnabled()
         assertEquals(0, continued)

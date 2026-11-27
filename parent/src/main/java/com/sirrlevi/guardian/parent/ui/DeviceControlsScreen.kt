@@ -120,7 +120,21 @@ fun DeviceControlsScreen(vm: ParentViewModel, padding: PaddingValues, watching: 
 
         item { ControlActions(model, device.isOnline, onLock = { confirm = ControlType.LOCK }, onReboot = { confirm = ControlType.REBOOT }) }
 
-        item { EraseCard(model, onErase = { eraseTyped = ""; eraseDialog = true }) }
+        item {
+            EraseCard(model, onErase = { eraseTyped = ""; eraseDialog = true }) {
+                if (eraseDialog && device != null) {
+                    val intent = credentialIntent(context, "Erase ${device.name}")
+                    EraseConfirmation(
+                        deviceName = device.name, typed = eraseTyped, onTyped = { eraseTyped = it.take(12) }, hasScreenLock = intent != null,
+                        onContinue = {
+                            eraseDialog = false
+                            if (intent != null) eraseCredential.launch(intent)
+                        },
+                        onCancel = { eraseDialog = false; eraseTyped = "" }
+                    )
+                }
+            }
+        }
 
         item { SectionTitle("Not possible on Android", subtitle = "Guardian doesn't offer these, and doesn't pretend to.") }
         item {
@@ -192,60 +206,48 @@ fun DeviceControlsScreen(vm: ParentViewModel, padding: PaddingValues, watching: 
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } }
         )
     }
-
-    if (eraseDialog && device != null) {
-        val intent = credentialIntent(context, "Erase ${device.name}")
-        EraseDialog(
-            deviceName = device.name, typed = eraseTyped, onTyped = { eraseTyped = it.take(12) }, hasScreenLock = intent != null,
-            onContinue = {
-                eraseDialog = false
-                if (intent != null) eraseCredential.launch(intent)
-            },
-            onCancel = { eraseDialog = false; eraseTyped = "" }
-        )
-    }
 }
 
-/** Whether the erase dialog may continue. Pure, so the rule is tested without any UI. */
+/** Whether the erase confirmation may continue. Pure, so the rule is tested without any UI. */
 internal object EraseConfirm {
     fun canContinue(typed: String, hasScreenLock: Boolean) = hasScreenLock && typed == ControlTexts.ERASE_WORD
 }
 
 /**
- * The erase confirmation. The typed word and whether this phone has a screen lock are passed in, so the dialog itself holds no state:
- * Continue is enabled only for the exact word and only when the screen lock can be asked for afterwards.
+ * The erase confirmation, shown inside the Erase card rather than in a dialog window. The typed word and whether this phone has a screen
+ * lock are passed in, so it holds no state: Continue is enabled only for the exact word and only when the screen lock can be asked for afterwards.
  */
 @Composable
-internal fun EraseDialog(deviceName: String, typed: String, onTyped: (String) -> Unit, hasScreenLock: Boolean, onContinue: () -> Unit, onCancel: () -> Unit) {
+internal fun EraseConfirmation(deviceName: String, typed: String, onTyped: (String) -> Unit, hasScreenLock: Boolean, onContinue: () -> Unit, onCancel: () -> Unit) {
     val ready = EraseConfirm.canContinue(typed, hasScreenLock)
-    AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("Erase $deviceName?") },
-        text = {
-            Column {
-                Text(ControlTexts.ERASE_WARNING, style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(8.dp))
-                Text(ControlTexts.ERASE_AFTER, style = MaterialTheme.typography.bodySmall, color = gColors.muted)
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = typed, onValueChange = onTyped, singleLine = true,
-                    label = { Text("Type ${ControlTexts.ERASE_WORD} to confirm") }, modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    if (hasScreenLock) "Next you'll be asked for this phone's screen lock to confirm it's you."
-                    else "This phone has no screen lock, so Guardian can't confirm it's you. Set a PIN, pattern or password on this phone first: erasing needs it.",
-                    style = MaterialTheme.typography.bodySmall, color = if (hasScreenLock) gColors.muted else gColors.warning
-                )
-            }
-        },
-        confirmButton = { TextButton(enabled = ready, onClick = onContinue) { Text("Continue", color = if (ready) gColors.danger else gColors.muted) } },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } }
-    )
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Text("Erase $deviceName?", style = MaterialTheme.typography.titleMedium, color = gColors.danger)
+        Spacer(Modifier.height(6.dp))
+        Text(ControlTexts.ERASE_WARNING, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(8.dp))
+        Text(ControlTexts.ERASE_AFTER, style = MaterialTheme.typography.bodySmall, color = gColors.muted)
+        Spacer(Modifier.height(12.dp))
+        Text("Type ${ControlTexts.ERASE_WORD} to confirm", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(4.dp))
+        OutlinedTextField(
+            value = typed, onValueChange = onTyped, singleLine = true,
+            placeholder = { Text(ControlTexts.ERASE_WORD) }, modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            if (hasScreenLock) "Next you'll be asked for this phone's screen lock to confirm it's you."
+            else "This phone has no screen lock, so Guardian can't confirm it's you. Set a PIN, pattern or password on this phone first: erasing needs it.",
+            style = MaterialTheme.typography.bodySmall, color = if (hasScreenLock) gColors.muted else gColors.warning
+        )
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = onCancel) { Text("Cancel") }
+            TextButton(enabled = ready, onClick = onContinue) { Text("Continue", color = if (ready) gColors.danger else gColors.muted) }
+        }
+    }
 }
 
 @Composable
-private fun EraseCard(model: DeviceControlModel, onErase: () -> Unit) {
+private fun EraseCard(model: DeviceControlModel, onErase: () -> Unit, confirmation: @Composable () -> Unit) {
     val offer = model.eraseOffer
     val busy = model.sending || model.waiting != null
     GCard {
@@ -262,6 +264,7 @@ private fun EraseCard(model: DeviceControlModel, onErase: () -> Unit) {
         } else {
             Spacer(Modifier.height(10.dp))
             SoftButton("Erase phone…", onErase, Modifier.fillMaxWidth(), enabled = !busy, color = gColors.danger, icon = GIcon.Trash)
+            confirmation()
             Text(
                 "You'll type ${ControlTexts.ERASE_WORD} and confirm with this phone's screen lock. The request lasts one minute.",
                 style = MaterialTheme.typography.bodySmall, color = gColors.muted, modifier = Modifier.padding(top = 4.dp)
