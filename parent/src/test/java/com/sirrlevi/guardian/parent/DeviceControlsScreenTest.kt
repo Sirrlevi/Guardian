@@ -3,12 +3,10 @@ package com.sirrlevi.guardian.parent
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
 import android.app.KeyguardManager
 import android.content.Context
@@ -20,6 +18,8 @@ import com.sirrlevi.guardian.core.ControlTexts
 import com.sirrlevi.guardian.core.ControlType
 import com.sirrlevi.guardian.core.FamilyPolicy
 import com.sirrlevi.guardian.parent.ui.DeviceControlsScreen
+import com.sirrlevi.guardian.parent.ui.EraseConfirm
+import com.sirrlevi.guardian.parent.ui.EraseDialog
 import com.sirrlevi.guardian.parent.ui.GuardianTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -218,33 +218,44 @@ class DeviceControlsScreenTest {
         assertTrue(fake.sent.isEmpty())
     }
 
+    // The dialog is shown with the typed word passed in, rather than typed through a focused field in a dialog window: that combination
+    // never became idle under Robolectric. What the typing does is plain state, and what the word decides is `EraseConfirm`, tested below.
+    private fun showEraseDialog(typed: String, hasLock: Boolean, onContinue: () -> Unit = {}) {
+        rule.setContent { GuardianTheme(ThemeMode.Light) { EraseDialog("Aarav's phone", typed, {}, hasLock, onContinue, {}) } }
+        rule.waitForIdle()
+    }
+
+    @Test fun onlyTheExactWordWithAScreenLockCanContinue() {
+        assertTrue(EraseConfirm.canContinue("ERASE", true))
+        assertFalse("case matters", EraseConfirm.canContinue("erase", true))
+        assertFalse("no extra spaces", EraseConfirm.canContinue("ERASE ", true))
+        assertFalse(EraseConfirm.canContinue("", true))
+        assertFalse(EraseConfirm.canContinue("ERAS", true))
+        assertFalse("the word alone is not enough without a screen lock to ask for", EraseConfirm.canContinue("ERASE", false))
+    }
+
     @Test fun continueStaysDisabledUntilTheWordIsTypedExactly() {
-        parentPhoneHasScreenLock(true)
-        show(status(owner = true))
-        rule.onNodeWithText("Erase phone…").performClick()
-        rule.onNode(hasSetTextAction()).performTextInput("erase")
+        showEraseDialog("erase", hasLock = true)
+        assertTrue(has("Erase Aarav's phone?"))
         rule.onNodeWithText("Continue").assertIsNotEnabled()
     }
 
-    @Test fun theWordAloneIsEnoughToEnableContinueOnlyWhenThisPhoneHasAScreenLock() {
-        parentPhoneHasScreenLock(true)
-        val fake = FakeControlBackend()
-        show(status(owner = true), backend = fake)
-        rule.onNodeWithText("Erase phone…").performClick()
-        rule.onNode(hasSetTextAction()).performTextInput(ControlTexts.ERASE_WORD)
+    @Test fun theExactWordEnablesContinueWhenThisPhoneHasAScreenLock() {
+        var continued = 0
+        showEraseDialog("ERASE", hasLock = true) { continued++ }
         rule.onNodeWithText("Continue").assertIsEnabled()
-        assertTrue("the request is only sent after the screen lock was confirmed", fake.sent.isEmpty())
+        assertTrue(has("Next you'll be asked for this phone's screen lock", substring = true))
+        assertEquals("nothing happens until Continue is pressed", 0, continued)
+        rule.onNodeWithText("Continue").performClick()
+        assertEquals(1, continued)
     }
 
     @Test fun withoutAScreenLockOnThisPhoneEraseCannotBeConfirmed() {
-        parentPhoneHasScreenLock(false)
-        val fake = FakeControlBackend()
-        show(status(owner = true), backend = fake)
-        rule.onNodeWithText("Erase phone…").performClick()
-        rule.onNode(hasSetTextAction()).performTextInput(ControlTexts.ERASE_WORD)
+        var continued = 0
+        showEraseDialog("ERASE", hasLock = false) { continued++ }
         assertTrue(has("This phone has no screen lock", substring = true))
         rule.onNodeWithText("Continue").assertIsNotEnabled()
-        assertTrue(fake.sent.isEmpty())
+        assertEquals(0, continued)
     }
 
     @Test fun anAcceptedEraseIsNeverShownAsFinished() {
