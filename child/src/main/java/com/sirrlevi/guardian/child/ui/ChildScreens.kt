@@ -380,6 +380,10 @@ fun ProtectionScreen(vm: ChildViewModel, padding: PaddingValues, actions: ChildA
                         Text(if (vm.isDeviceOwner) "Device Owner mode is on: blocked apps are suspended by Android itself."
                         else "Optional. Blocked apps are covered by the \"time's up\" screen. Full suspension needs Device Owner setup.",
                             style = MaterialTheme.typography.bodySmall, color = kc.muted)
+                        if (vm.isDeviceOwner) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(com.sirrlevi.guardian.core.ControlTexts.ERASE_DISCLOSURE, style = MaterialTheme.typography.bodySmall, color = kc.muted)
+                        }
                     }
                 }
                 if (!vm.isDeviceOwner) {

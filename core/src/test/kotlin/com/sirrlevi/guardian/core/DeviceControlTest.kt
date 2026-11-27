@@ -54,6 +54,10 @@ private class ControlFakeHost : ControlHost {
     var rebootThrows: Exception? = null
     var lockCalls = 0
     var rebootCalls = 0
+    var resetBlocked = false
+    var eraseThrows: Exception? = null
+    var eraseCalls = 0
+    var beforeErase: (() -> Unit)? = null
     var boot = time - 3_600_000L
     var pending: PendingReboot? = null
     var lockAfterSleeps = 0
@@ -71,6 +75,8 @@ private class ControlFakeHost : ControlHost {
         if (lockWorks && lockAfterSleeps == 0) { locked = true; screen = false }
     }
     override fun reboot() { rebootCalls++; rebootThrows?.let { throw it } }
+    override fun factoryResetBlocked() = resetBlocked
+    override fun erase() { eraseCalls++; beforeErase?.invoke(); eraseThrows?.let { throw it } }
     override fun bootAt() = boot
     var ringable = true
     var ringOutcome = ControlOutcome(ControlResult.DONE, RecoveryTexts.RING_STARTED)
@@ -276,9 +282,171 @@ class DeviceControlTest {
     }
 
     @Test fun thereIsNoUnlockOrShutdownType() {
-        assertEquals("only these requests exist; nothing can unlock, shut down or erase", listOf("lock", "reboot", "ring", "locate"), ControlType.values().map { it.code })
+        assertEquals("only these requests exist; nothing can unlock or shut down", listOf("lock", "reboot", "ring", "locate", "erase"), ControlType.values().map { it.code })
         assertNull(ControlType.fromCode("unlock"))
         assertNull(ControlType.fromCode("shutdown"))
+    }
+
+
+    // ---------------------------------------------------------------- erase (factory reset)
+
+    private val eraseId = "cmd-0001-abcdef"
+
+    @Test fun eraseIsRefusedUnlessTheAppIsDeviceOwner() {
+        host.owner = false
+        request(ControlType.ERASE)
+        processor.poll()
+        val ack = store.acks.getValue(eraseId)
+        assertEquals(ControlResult.REJECTED, ack.result)
+        assertEquals(ControlTexts.ERASE_NEEDS_OWNER, ack.reason)
+        assertEquals(0, host.eraseCalls)
+    }
+
+    @Test fun eraseIsRefusedOnAndroidTooOldToAllowIt() {
+        host.owner = true; host.sdkLevel = 23
+        request(ControlType.ERASE)
+        processor.poll()
+        assertEquals(ControlResult.REJECTED, store.acks.getValue(eraseId).result)
+        assertEquals(0, host.eraseCalls)
+    }
+
+    @Test fun eraseIsRefusedWhenAndroidForbidsAFactoryReset() {
+        host.owner = true; host.resetBlocked = true
+        request(ControlType.ERASE)
+        processor.poll()
+        assertEquals(ControlTexts.ERASE_BLOCKED, store.acks.getValue(eraseId).reason)
+        assertEquals(0, host.eraseCalls)
+    }
+
+    @Test fun eraseWithoutTheParentsTypedConfirmationIsNeverRun() {
+        host.owner = true
+        for ((i, word) in listOf("", "erase", "Erase", "ERASE ", "YES").withIndex()) {
+            val id = "cmd-000${i + 1}-abcdef"
+            store.inbox.add(ControlCommand(id, "erase", host.time, host.time + ControlPolicy.ERASE_TTL_MS, word))
+        }
+        processor.poll()
+        assertEquals(0, host.eraseCalls)
+        assertEquals(5, store.acks.size)
+        assertTrue(store.acks.values.all { it.result == ControlResult.REJECTED && it.reason == ControlTexts.ERASE_NOT_CONFIRMED })
+    }
+
+    @Test fun eraseTellsTheParentBeforeThePhoneIsWiped() {
+        host.owner = true
+        var answeredFirst = false
+        host.beforeErase = { answeredFirst = store.acks[eraseId]?.result == ControlResult.ERASING && seen.ids.contains(eraseId) }
+        request(ControlType.ERASE)
+        assertEquals(1, processor.poll())
+        assertEquals(1, host.eraseCalls)
+        assertTrue("the answer and the replay protection exist before the wipe starts", answeredFirst)
+        assertEquals(ControlResult.ERASING, store.acks.getValue(eraseId).result)
+        assertTrue(store.deleted.contains(eraseId))
+        assertEquals(ControlResult.ERASING, store.events.single().result)
+    }
+
+    @Test fun eraseDoesNotHappenWhenTheParentCannotBeToldFirst() {
+        host.owner = true
+        store.failAckWrites = 1
+        request(ControlType.ERASE)
+        assertEquals(0, processor.poll())
+        assertEquals(0, host.eraseCalls)
+        assertFalse(seen.ids.contains(eraseId))
+        assertEquals("the next pass works and the request is still valid", 1, processor.poll())
+        assertEquals(1, host.eraseCalls)
+    }
+
+    @Test fun aRepeatedEraseRequestIsNeverRunTwice() {
+        host.owner = true
+        host.eraseThrows = IllegalStateException("did not start")
+        request(ControlType.ERASE)
+        processor.poll()
+        // The same request shows up again (replayed, or the delete failed): it is only settled, never run again.
+        store.inbox.add(ControlCommand.create(eraseId, ControlType.ERASE, host.time))
+        processor.poll()
+        assertEquals(1, host.eraseCalls)
+    }
+
+    @Test fun androidRefusingTheEraseIsReported() {
+        host.owner = true
+        host.eraseThrows = SecurityException("not allowed")
+        request(ControlType.ERASE)
+        processor.poll()
+        val ack = store.acks.getValue(eraseId)
+        assertEquals(ControlResult.REJECTED, ack.result)
+        assertTrue(ack.reason.contains("Android refused to erase the phone"))
+    }
+
+    @Test fun anEraseThatFailedToStartIsReportedAsFailed() {
+        host.owner = true
+        host.eraseThrows = IllegalStateException("boom")
+        request(ControlType.ERASE)
+        processor.poll()
+        assertEquals(ControlResult.FAILED, store.acks.getValue(eraseId).result)
+    }
+
+    @Test fun eraseLivesOnlyOneMinute() {
+        val c = ControlCommand.create(eraseId, ControlType.ERASE, host.time)
+        assertEquals(host.time + ControlPolicy.ERASE_TTL_MS, c.expiresAt)
+        assertEquals(ControlTexts.ERASE_WORD, c.confirm)
+        assertEquals(ControlCommands.Validity.OK, ControlCommands.validity(c, host.time))
+        // Older than a minute (plus the allowed clock difference): too late, and it is not run.
+        host.owner = true
+        val late = ControlCommand(eraseId, "erase", host.time - 3 * 60_000L, host.time - 2 * 60_000L, ControlTexts.ERASE_WORD)
+        store.inbox.add(late)
+        processor.poll()
+        assertEquals(ControlResult.EXPIRED, store.acks.getValue(eraseId).result)
+        assertEquals(0, host.eraseCalls)
+    }
+
+    @Test fun anEraseRequestClaimingALongerLifeIsTreatedAsForged() {
+        host.owner = true
+        store.inbox.add(ControlCommand(eraseId, "erase", host.time, host.time + 4 * 60_000L, ControlTexts.ERASE_WORD))
+        processor.poll()
+        assertEquals(ControlResult.REJECTED, store.acks.getValue(eraseId).result)
+        assertEquals(ControlTexts.INVALID, store.acks.getValue(eraseId).reason)
+        assertEquals(0, host.eraseCalls)
+    }
+
+    @Test fun onlyEraseCarriesAConfirmationAndItSurvivesTheDatabase() {
+        val erase = ControlCommand.create(eraseId, ControlType.ERASE, 5_000L)
+        assertEquals(erase, ControlCommandCodec.fromJson(eraseId, ControlCommandCodec.toJson(erase)))
+        assertEquals(ControlTexts.ERASE_WORD, ControlCommandCodec.toJson(erase).get("ok").asString)
+        val lock = ControlCommand.create(eraseId, ControlType.LOCK, 5_000L)
+        assertEquals("", lock.confirm)
+        assertFalse(ControlCommandCodec.toJson(lock).has("ok"))
+    }
+
+    @Test fun statusSaysThePhoneCanEraseOnlyWhenItReallyCan() {
+        host.owner = false
+        processor.reportStatus()
+        assertFalse(store.statuses.last().canErase)
+        host.owner = true
+        processor.reportStatus()
+        assertTrue(store.statuses.last().canErase)
+        host.resetBlocked = true
+        processor.reportStatus()
+        assertFalse(store.statuses.last().canErase)
+        host.resetBlocked = false; host.sdkLevel = 23
+        processor.reportStatus()
+        assertFalse(store.statuses.last().canErase)
+    }
+
+    @Test fun parentOffersEraseOnlyForAnEligiblePhoneAndSaysWhyNot() {
+        assertEquals(ControlTexts.NO_REPORT, ControlOffer.erase(null).why)
+        val capable = ControlStatus(host.time, true, true, true, true, false, true, host.boot, false, canErase = true)
+        assertTrue(ControlOffer.erase(capable).available)
+        assertEquals(ControlTexts.ERASE_NEEDS_OWNER, ControlOffer.erase(capable.copy(deviceOwner = false, canErase = false)).why)
+        assertEquals(ControlTexts.ERASE_BLOCKED, ControlOffer.erase(capable.copy(canErase = false)).why)
+    }
+
+    @Test fun anOldStatusWithoutTheEraseFlagMeansNoErase() {
+        val old = ControlStatusCodec.toJson(ControlStatus(1L, true, true, true, true, false, true, 0L, false, canErase = true)).also { it.remove("erase") }
+        assertFalse(ControlStatusCodec.fromJson(old)!!.canErase)
+    }
+
+    @Test fun theEraseTextsSayItCannotBeUndoneAndCannotBeConfirmed() {
+        assertTrue(ControlTexts.ERASE_WARNING.contains("can't be undone"))
+        assertTrue(ControlTexts.ERASE_AFTER.contains("can't see the end result"))
+        assertTrue(ControlTexts.ERASE_DISCLOSURE.contains("can't be undone"))
     }
 
     @Test fun anOldRequestIsAnsweredAsExpiredAndNotRun() {

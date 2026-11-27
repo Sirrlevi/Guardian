@@ -50,8 +50,8 @@ class DeviceControlModelTest {
     private var gate = ControlOffer.Option(true, "")
     private val model = DeviceControlModel({ backend }, { time }, { "ctl-" + (++counter).toString().padStart(8, '0') }, locateGate = { gate }, io = EmptyCoroutineContext)
 
-    private fun capable(admin: Boolean = true, owner: Boolean = true, pending: Boolean = false) =
-        ControlStatus(time, admin, owner, admin, owner, false, true, time - 3_600_000L, pending)
+    private fun capable(admin: Boolean = true, owner: Boolean = true, pending: Boolean = false, erase: Boolean = owner) =
+        ControlStatus(time, admin, owner, admin, owner, false, true, time - 3_600_000L, pending, canErase = erase)
 
     private fun ack(id: String, type: String, result: ControlResult, reason: String) = ControlAck(id, type, result, reason, time)
 
@@ -398,5 +398,101 @@ class DeviceControlModelTest {
         assertFalse(model.locate())
         assertFalse(model.lock())
         assertEquals(1, backend.sent.size)
+    }
+
+    // ---------------------------------------------------------------- erase
+
+    @Test fun eraseIsOfferedOnlyForAPhoneThatCanReallyDoIt() = runBlocking {
+        backend.statusNow = capable(owner = false)
+        model.tick()
+        assertFalse(model.eraseOffer.available)
+        assertEquals(ControlTexts.ERASE_NEEDS_OWNER, model.eraseOffer.why)
+        assertFalse(model.erase(ControlTexts.ERASE_WORD))
+        assertTrue(backend.sent.isEmpty())
+        assertEquals(ControlTexts.ERASE_NEEDS_OWNER, model.notice)
+        backend.statusNow = capable(owner = true, erase = false)
+        model.tick()
+        assertEquals(ControlTexts.ERASE_BLOCKED, model.eraseOffer.why)
+        backend.statusNow = capable(owner = true)
+        model.tick()
+        assertTrue(model.eraseOffer.available)
+    }
+
+    @Test fun nothingIsSentUnlessTheWordIsTypedExactly() = runBlocking {
+        backend.statusNow = capable()
+        model.tick()
+        for (typed in listOf("", "erase", "Erase", "ERASE ", " ERASE", "YES", "ERAS")) {
+            assertFalse("'$typed'", model.erase(typed))
+            assertTrue(model.noticeIsProblem)
+        }
+        assertTrue(backend.sent.isEmpty())
+        assertNull(model.waiting)
+    }
+
+    @Test fun eraseSendsOneShortLivedRequestCarryingTheConfirmationAndIsNotDoneYet() = runBlocking {
+        backend.statusNow = capable()
+        model.tick()
+        assertTrue(model.erase(ControlTexts.ERASE_WORD))
+        val cmd = backend.sent.single()
+        assertEquals(ControlType.ERASE, cmd.type)
+        assertEquals(ControlTexts.ERASE_WORD, cmd.confirm)
+        assertEquals(time + ControlPolicy.ERASE_TTL_MS, cmd.expiresAt)
+        assertEquals(ControlType.ERASE, model.waiting)
+        assertFalse(model.noticeIsProblem)
+        assertTrue(model.notice!!.contains("nothing is erased"))
+    }
+
+    @Test fun aSecondRequestWhileEraseIsWaitingIsNotSent() = runBlocking {
+        backend.statusNow = capable()
+        model.tick()
+        model.erase(ControlTexts.ERASE_WORD)
+        assertFalse(model.erase(ControlTexts.ERASE_WORD))
+        assertEquals(1, backend.sent.size)
+    }
+
+    @Test fun whenThePhoneAcceptsTheEraseTheParentIsToldItCannotBeConfirmed() = runBlocking {
+        backend.statusNow = capable()
+        model.tick()
+        model.erase(ControlTexts.ERASE_WORD)
+        val id = backend.sent.single().id
+        backend.acks[id] = ack(id, "erase", ControlResult.ERASING, ControlTexts.ERASING)
+        model.tick()
+        assertNull(model.waiting)
+        assertFalse(model.noticeIsProblem)
+        assertTrue(model.notice!!.startsWith(ControlTexts.ERASING))
+        assertTrue(model.notice!!.contains("can't see the end result"))
+        assertFalse("never claimed as finished", model.notice!!.contains("erased."))
+        assertEquals(listOf(id), backend.deletedAcks)
+    }
+
+    @Test fun anEraseThePhoneNeverAnsweredIsCancelledAndNothingIsClaimed() = runBlocking {
+        backend.statusNow = capable()
+        model.tick()
+        model.erase(ControlTexts.ERASE_WORD)
+        val id = backend.sent.single().id
+        time += ControlPolicy.ERASE_TTL_MS + ControlPolicy.CLOCK_SKEW_MS + ControlPolicy.ACK_GRACE_MS + 1_000L
+        model.tick()
+        assertEquals(listOf(id), backend.withdrawn)
+        assertNull(model.waiting)
+        assertTrue(model.noticeIsProblem)
+        assertTrue(model.notice!!.contains("nothing was done"))
+    }
+
+    @Test fun aRefusedEraseShowsThePhonesReasonAsAProblem() = runBlocking {
+        backend.statusNow = capable()
+        model.tick()
+        model.erase(ControlTexts.ERASE_WORD)
+        val id = backend.sent.single().id
+        backend.acks[id] = ack(id, "erase", ControlResult.REJECTED, ControlTexts.ERASE_BLOCKED)
+        model.tick()
+        assertEquals(ControlTexts.ERASE_BLOCKED, model.notice)
+        assertTrue(model.noticeIsProblem)
+    }
+
+    @Test fun theHistoryNeverCallsAnEraseFinished() {
+        val label = ControlLabels.event(ControlEvent(1L, "erase", ControlResult.ERASING, "ctl-00000001"))
+        assertTrue(label, label.contains("can't be confirmed"))
+        assertEquals("Erase refused by the phone", ControlLabels.event(ControlEvent(1L, "erase", ControlResult.REJECTED, "ctl-00000001")))
+        assertEquals("Erase failed", ControlLabels.event(ControlEvent(1L, "erase", ControlResult.FAILED, "ctl-00000001")))
     }
 }

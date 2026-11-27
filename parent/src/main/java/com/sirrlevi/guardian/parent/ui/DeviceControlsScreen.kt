@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -69,6 +70,16 @@ fun DeviceControlsScreen(vm: ParentViewModel, padding: PaddingValues, watching: 
         else model.tell("Restart cancelled. Your screen lock wasn't confirmed.", problem = false)
     }
 
+    // Erase is asked for in two steps: the word ERASE typed here, then this phone's screen lock. The typed word travels with the request.
+    var eraseDialog by remember { mutableStateOf(false) }
+    var eraseTyped by remember { mutableStateOf("") }
+    val eraseCredential = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val typed = eraseTyped
+        eraseTyped = ""
+        if (result.resultCode == Activity.RESULT_OK) scope.launch { model.erase(typed) }
+        else model.tell("Erase cancelled. Your screen lock wasn't confirmed, so nothing was sent.", problem = false)
+    }
+
     LaunchedEffect(device?.id, watching) { if (device != null && watching) model.watch() }
     LaunchedEffect(watching) {
         if (watching) {
@@ -109,6 +120,8 @@ fun DeviceControlsScreen(vm: ParentViewModel, padding: PaddingValues, watching: 
 
         item { ControlActions(model, device.isOnline, onLock = { confirm = ControlType.LOCK }, onReboot = { confirm = ControlType.REBOOT }) }
 
+        item { EraseCard(model, onErase = { eraseTyped = ""; eraseDialog = true }) }
+
         item { SectionTitle("Not possible on Android", subtitle = "Guardian doesn't offer these, and doesn't pretend to.") }
         item {
             GCard {
@@ -143,7 +156,7 @@ fun DeviceControlsScreen(vm: ParentViewModel, padding: PaddingValues, watching: 
 
     val asking = confirm
     if (asking != null && device != null) {
-        val secure = asking == ControlType.REBOOT && credentialIntent(context, device.name) != null
+        val secure = asking == ControlType.REBOOT && credentialIntent(context, "Restart ${device.name}") != null
         AlertDialog(
             onDismissRequest = { confirm = null },
             title = { Text(if (asking == ControlType.LOCK) "Lock ${device.name} now?" else "Restart ${device.name}?") },
@@ -171,7 +184,7 @@ fun DeviceControlsScreen(vm: ParentViewModel, padding: PaddingValues, watching: 
                     confirm = null
                     if (asking == ControlType.LOCK) scope.launch { model.lock() }
                     else {
-                        val intent = credentialIntent(context, device.name)
+                        val intent = credentialIntent(context, "Restart ${device.name}")
                         if (intent != null) credential.launch(intent) else scope.launch { model.reboot() }
                     }
                 }) { Text(if (asking == ControlType.LOCK) "Yes, lock it" else "Yes, restart", color = if (asking == ControlType.REBOOT) gColors.danger else MaterialTheme.colorScheme.primary) }
@@ -179,11 +192,74 @@ fun DeviceControlsScreen(vm: ParentViewModel, padding: PaddingValues, watching: 
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } }
         )
     }
+
+    if (eraseDialog && device != null) {
+        val intent = credentialIntent(context, "Erase ${device.name}")
+        val typedRight = eraseTyped == ControlTexts.ERASE_WORD
+        AlertDialog(
+            onDismissRequest = { eraseDialog = false; eraseTyped = "" },
+            title = { Text("Erase ${device.name}?") },
+            text = {
+                Column {
+                    Text(ControlTexts.ERASE_WARNING, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(ControlTexts.ERASE_AFTER, style = MaterialTheme.typography.bodySmall, color = gColors.muted)
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = eraseTyped, onValueChange = { eraseTyped = it.take(12) }, singleLine = true,
+                        label = { Text("Type ${ControlTexts.ERASE_WORD} to confirm") }, modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        if (intent != null) "Next you'll be asked for this phone's screen lock to confirm it's you."
+                        else "This phone has no screen lock, so Guardian can't confirm it's you. Set a PIN, pattern or password on this phone first: erasing needs it.",
+                        style = MaterialTheme.typography.bodySmall, color = if (intent != null) gColors.muted else gColors.warning
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = typedRight && intent != null,
+                    onClick = {
+                        eraseDialog = false
+                        if (intent != null) eraseCredential.launch(intent)
+                    }
+                ) { Text("Continue", color = if (typedRight && intent != null) gColors.danger else gColors.muted) }
+            },
+            dismissButton = { TextButton(onClick = { eraseDialog = false; eraseTyped = "" }) { Text("Cancel") } }
+        )
+    }
 }
 
-private fun credentialIntent(context: Context, name: String): Intent? = try {
+@Composable
+private fun EraseCard(model: DeviceControlModel, onErase: () -> Unit) {
+    val offer = model.eraseOffer
+    val busy = model.sending || model.waiting != null
+    GCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Erase phone", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            if (!offer.available) Pill("Unavailable", gColors.muted)
+        }
+        Text(
+            "Factory reset. For a lost or stolen phone only. It can't be undone, and the phone can't confirm when it's finished.",
+            style = MaterialTheme.typography.bodySmall, color = gColors.muted, modifier = Modifier.padding(top = 2.dp)
+        )
+        if (!offer.available) {
+            Text(offer.why, style = MaterialTheme.typography.bodySmall, color = gColors.muted, modifier = Modifier.padding(top = 6.dp))
+        } else {
+            Spacer(Modifier.height(10.dp))
+            SoftButton("Erase phone…", onErase, Modifier.fillMaxWidth(), enabled = !busy, color = gColors.danger, icon = GIcon.Trash)
+            Text(
+                "You'll type ${ControlTexts.ERASE_WORD} and confirm with this phone's screen lock. The request lasts one minute.",
+                style = MaterialTheme.typography.bodySmall, color = gColors.muted, modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+private fun credentialIntent(context: Context, title: String): Intent? = try {
     val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-    if (keyguard.isDeviceSecure) keyguard.createConfirmDeviceCredentialIntent("Restart $name", "Confirm it's you with your screen lock.") else null
+    if (keyguard.isDeviceSecure) keyguard.createConfirmDeviceCredentialIntent(title, "Confirm it's you with your screen lock.") else null
 } catch (_: Exception) { null }
 
 @Composable

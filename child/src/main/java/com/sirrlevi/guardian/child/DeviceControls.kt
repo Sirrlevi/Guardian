@@ -7,6 +7,7 @@ import android.content.Context
 import android.os.Build
 import android.os.PowerManager
 import android.os.SystemClock
+import android.os.UserManager
 import android.util.Log
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
@@ -115,6 +116,14 @@ internal class AndroidControlHost(context: Context) : ControlHost {
     override fun isLocked(): Boolean = try { keyguard.isKeyguardLocked || !power.isInteractive } catch (_: Exception) { false }
     override fun lockNow() = policy.lockNow()
     override fun reboot() = policy.reboot(admin)
+
+    /** Unknown counts as blocked: an erase is never attempted on a guess. */
+    override fun factoryResetBlocked(): Boolean = try {
+        (app.getSystemService(Context.USER_SERVICE) as UserManager).hasUserRestriction(UserManager.DISALLOW_FACTORY_RESET)
+    } catch (_: Exception) { true }
+
+    /** Factory reset without removing Android's factory-reset protection. Only reached for a Device Owner, after the parent's confirmation was checked. */
+    override fun erase() = policy.wipeData(0)
     override fun bootAt(): Long = System.currentTimeMillis() - SystemClock.elapsedRealtime()
 
     /** Location sharing and "find now"; ticked by [ControlRuntime] and asked by the parent's locate request. */

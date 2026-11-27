@@ -9,9 +9,10 @@ import java.util.Locale
  * Rules that shape the code:
  *  - A request is only ever shown as done after the child's phone has answered it. The phone answers only after it has looked at
  *    the real result (is the screen locked now?), and a refusal comes with the reason.
- *  - Only two actions exist: lock and restart. There is deliberately no "unlock" (Android does not let an app get around a PIN,
+ *  - The actions are lock, restart, ring, find now and erase. There is deliberately no "unlock" (Android does not let an app get around a PIN,
  *    pattern, password or fingerprint) and no "shut down" (Android has no supported way to do it); the screens say so.
- *  - Restart works only when Guardian Child is the phone's Device Owner. Without that Android would refuse, and so does Guardian.
+ *  - Restart and erase work only when Guardian Child is the phone's Device Owner. Without that Android would refuse them, and so does Guardian.
+ *  - Erase can never be undone, so it also needs the parent's typed confirmation, lives only one minute and is acknowledged before it starts.
  *  - Every request has an id, a short life and is handled at most once, so an old or repeated request can never run again.
  */
 
@@ -37,6 +38,9 @@ object ControlPolicy {
     const val STATUS_STALE_MS = 3 * 60_000L
     const val ACK_KEEP_MS = 24 * 3_600_000L
     const val MIN_SDK_REBOOT = 24
+    const val MIN_SDK_ERASE = 24
+    /** Erase lives much shorter than the other requests: it must never wait around in the database. */
+    const val ERASE_TTL_MS = 60_000L
 }
 
 enum class ControlType(val code: String) {
@@ -44,7 +48,9 @@ enum class ControlType(val code: String) {
     /** Plays the alarm sound with a visible notice on the phone. */
     RING("ring"),
     /** Reads a fresh position, only when location sharing is on. */
-    LOCATE("locate");
+    LOCATE("locate"),
+    /** Factory reset. Device Owner only, and only with the parent's typed confirmation. */
+    ERASE("erase");
 
     companion object {
         fun fromCode(code: String?): ControlType? = values().firstOrNull { it.code == code }
@@ -56,6 +62,8 @@ enum class ControlResult(val code: String) {
     DONE("done"),
     /** Restart only: the phone has accepted and is about to restart. The final answer comes after it is back. */
     RESTARTING("restarting"),
+    /** Erase only: the phone accepted and is erasing itself. A phone in the middle of a reset cannot report that it finished. */
+    ERASING("erasing"),
     FAILED("failed"),
     /** The phone refused on purpose (missing permission, not allowed, unknown request). */
     REJECTED("rejected"),
@@ -94,19 +102,40 @@ object ControlTexts {
     const val AFTER_RESTART_NOTE =
         "After a restart Android keeps the phone locked until your child enters their PIN once, so the phone reports back only after that."
     const val NO_REPORT = "Waiting for the phone to report what it can do. This needs the latest Guardian Child on that phone."
+
+    /** The word the parent has to type before an erase request is even sent; the phone refuses an erase request without it. */
+    const val ERASE_WORD = "ERASE"
+    const val ERASE_NEEDS_OWNER =
+        "Erasing a phone from another phone is only allowed for an app that is the phone's Device Owner. Guardian Child isn't set up that way on this phone, so Android would refuse it, and Guardian doesn't try."
+    const val ERASE_BLOCKED =
+        "Android on that phone doesn't allow a factory reset right now (a restriction is set on it), so Guardian can't erase it."
+    const val ERASE_NOT_CONFIRMED = "The phone ignored this request because it did not carry the parent's explicit confirmation."
+    const val ERASING = "The phone accepted the request and is erasing itself now."
+    const val ERASE_AFTER =
+        "Guardian can't see the end result, because a phone in the middle of a reset can't report that it finished. " +
+            "When it's done the phone starts as a new phone and won't appear here until it is set up and paired again. Guardian leaves Android's factory-reset protection in place."
+    const val ERASE_WARNING =
+        "This permanently deletes everything on the phone: photos, messages, apps, accounts and Guardian itself. It can't be undone and Guardian can't bring anything back. " +
+            "Use it only if the phone is lost or stolen and you've decided the data must go."
+    const val ERASE_DISCLOSURE =
+        "Because Guardian Child is this phone's Device Owner, your parent can ask the phone to erase itself (a factory reset). They have to type a confirmation and unlock their own phone, " +
+            "the request only lasts a minute, and it can't be undone. The phone keeps a record of every request."
 }
 
 /** What the phone can really do right now. */
 object ControlCapabilities {
     fun canLock(adminActive: Boolean) = adminActive
     fun canReboot(deviceOwner: Boolean, sdk: Int) = deviceOwner && sdk >= ControlPolicy.MIN_SDK_REBOOT
+    fun canErase(deviceOwner: Boolean, sdk: Int, factoryResetBlocked: Boolean) = deviceOwner && sdk >= ControlPolicy.MIN_SDK_ERASE && !factoryResetBlocked
 }
 
-data class ControlCommand(val id: String, val typeCode: String, val ts: Long, val expiresAt: Long) {
+data class ControlCommand(val id: String, val typeCode: String, val ts: Long, val expiresAt: Long, val confirm: String = "") {
     val type: ControlType? get() = ControlType.fromCode(typeCode)
 
     companion object {
-        fun create(id: String, type: ControlType, now: Long) = ControlCommand(id, type.code, now, now + ControlPolicy.TTL_MS)
+        fun create(id: String, type: ControlType, now: Long): ControlCommand =
+            if (type == ControlType.ERASE) ControlCommand(id, type.code, now, now + ControlPolicy.ERASE_TTL_MS, ControlTexts.ERASE_WORD)
+            else ControlCommand(id, type.code, now, now + ControlPolicy.TTL_MS)
     }
 }
 
@@ -115,12 +144,13 @@ object ControlCommandCodec {
         addProperty("t", c.typeCode)
         addProperty("ts", c.ts)
         addProperty("exp", c.expiresAt)
+        if (c.confirm.isNotEmpty()) addProperty("ok", c.confirm)
     }
 
     /** An unknown type is kept (and refused later with a reason) instead of being silently dropped. */
     fun fromJson(id: String, o: JsonObject): ControlCommand? = try {
         if (!isValidId(id)) null
-        else ControlCommand(id, o.get("t")?.asString.orEmpty(), o.get("ts")?.asLong ?: 0L, o.get("exp")?.asLong ?: 0L)
+        else ControlCommand(id, o.get("t")?.asString.orEmpty(), o.get("ts")?.asLong ?: 0L, o.get("exp")?.asLong ?: 0L, o.get("ok")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty())
     } catch (_: Exception) { null }
 
     /** Ids become database keys and replay-protection keys, so they stay short and plain. */
@@ -144,6 +174,7 @@ object ControlCommands {
 
     fun validity(c: ControlCommand, now: Long): Validity = when {
         c.expiresAt <= c.ts || c.expiresAt - c.ts > ControlPolicy.MAX_TTL_MS || c.ts > now + ControlPolicy.CLOCK_SKEW_MS -> Validity.INVALID
+        c.type == ControlType.ERASE && c.expiresAt - c.ts > ControlPolicy.ERASE_TTL_MS -> Validity.INVALID
         now > c.expiresAt + ControlPolicy.CLOCK_SKEW_MS -> Validity.EXPIRED
         else -> Validity.OK
     }
@@ -207,7 +238,9 @@ data class ControlStatus(
     /** True when the phone can ring (it can show the notice that goes with it). */
     val canRing: Boolean = false,
     /** While the phone is ringing: when it stops (0 when it isn't ringing). */
-    val ringUntil: Long = 0L
+    val ringUntil: Long = 0L,
+    /** True when the phone is a Device Owner that Android would let factory-reset itself. */
+    val canErase: Boolean = false
 )
 
 object ControlStatusCodec {
@@ -223,6 +256,7 @@ object ControlStatusCodec {
         addProperty("pending", s.rebootPending)
         addProperty("ring", s.canRing)
         addProperty("ringUntil", s.ringUntil)
+        addProperty("erase", s.canErase)
     }
 
     fun fromJson(o: JsonObject?): ControlStatus? {
@@ -233,7 +267,7 @@ object ControlStatusCodec {
                 ts = o.get("ts")?.asLong ?: return null,
                 adminActive = flag("admin"), deviceOwner = flag("owner"), canLock = flag("lock"), canReboot = flag("reboot"),
                 locked = flag("locked"), screenOn = flag("screen"), bootAt = o.get("boot")?.asLong ?: 0L, rebootPending = flag("pending"),
-                canRing = flag("ring"), ringUntil = o.get("ringUntil")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L
+                canRing = flag("ring"), ringUntil = o.get("ringUntil")?.takeIf { it.isJsonPrimitive }?.asLong ?: 0L, canErase = flag("erase")
             )
         } catch (_: Exception) { null }
     }
@@ -275,6 +309,13 @@ object ControlOffer {
         else -> Option(true, "")
     }
 
+    fun erase(status: ControlStatus?): Option = when {
+        status == null -> Option(false, ControlTexts.NO_REPORT)
+        !status.deviceOwner -> Option(false, ControlTexts.ERASE_NEEDS_OWNER)
+        !status.canErase -> Option(false, ControlTexts.ERASE_BLOCKED)
+        else -> Option(true, "")
+    }
+
     fun ring(status: ControlStatus?): Option = when {
         status == null -> Option(false, ControlTexts.NO_REPORT)
         !status.canRing -> Option(false, RecoveryTexts.RING_UNAVAILABLE)
@@ -312,6 +353,10 @@ interface ControlHost {
     fun screenOn(): Boolean
     fun lockNow()
     fun reboot()
+    /** True when Android has a restriction that forbids a factory reset on this phone. */
+    fun factoryResetBlocked(): Boolean
+    /** Starts a factory reset. Only ever called for a Device Owner, after the confirmation was checked and the "erasing" answer was written. */
+    fun erase()
     /** When the phone last started, on its own clock. */
     fun bootAt(): Long
     /** True when the phone can ring together with the visible notice that must go with it. */
@@ -359,6 +404,7 @@ class ControlProcessor(
                 ControlType.REBOOT -> { if (reboot(c)) answered++ }
                 ControlType.RING -> { ring(c); answered++ }
                 ControlType.LOCATE -> { locate(c); answered++ }
+                ControlType.ERASE -> { if (erase(c)) answered++ }
                 null -> { conclude(c, ControlResult.REJECTED, ControlTexts.UNSUPPORTED); answered++ }
             }
         }
@@ -374,7 +420,8 @@ class ControlProcessor(
                 ts = host.now(), adminActive = admin, deviceOwner = owner,
                 canLock = ControlCapabilities.canLock(admin), canReboot = ControlCapabilities.canReboot(owner, host.sdk()),
                 locked = host.isLocked(), screenOn = host.screenOn(), bootAt = host.bootAt(), rebootPending = host.pendingReboot() != null,
-                canRing = host.canRing(), ringUntil = host.ringUntil()
+                canRing = host.canRing(), ringUntil = host.ringUntil(),
+                canErase = ControlCapabilities.canErase(owner, host.sdk(), host.factoryResetBlocked())
             )
         )
     }
@@ -467,6 +514,36 @@ class ControlProcessor(
             log("restart refused", e)
             host.setPendingReboot(null)
             send(ControlAck(c.id, c.typeCode, ControlResult.FAILED, "Android refused to restart the phone.", host.now()), deleteCommand = false)
+        }
+        return true
+    }
+
+    /**
+     * Factory reset. Nothing is erased unless every check passes, in this order: the parent's typed confirmation travelled with the request,
+     * the app is the Device Owner, Android allows a factory reset, and the "erasing" answer was really written (the phone cannot answer afterwards).
+     * Returns true when the request was answered (accepted or refused).
+     */
+    private fun erase(c: ControlCommand): Boolean {
+        if (c.confirm != ControlTexts.ERASE_WORD) { conclude(c, ControlResult.REJECTED, ControlTexts.ERASE_NOT_CONFIRMED); return true }
+        if (!host.deviceOwner() || host.sdk() < ControlPolicy.MIN_SDK_ERASE) { conclude(c, ControlResult.REJECTED, ControlTexts.ERASE_NEEDS_OWNER); return true }
+        if (host.factoryResetBlocked()) { conclude(c, ControlResult.REJECTED, ControlTexts.ERASE_BLOCKED); return true }
+        val now = host.now()
+        try {
+            store.writeAck(ControlAck(c.id, c.typeCode, ControlResult.ERASING, ControlTexts.ERASING, now))
+        } catch (e: Exception) {
+            log("erase ack not written, not erasing", e)
+            return false
+        }
+        remember(c.id)
+        record(ControlEvent(now, c.typeCode, ControlResult.ERASING, c.id))
+        try { store.deleteCommand(c.id) } catch (e: Exception) { log("command not removed", e) }
+        try {
+            host.erase()
+        } catch (e: SecurityException) {
+            send(ControlAck(c.id, c.typeCode, ControlResult.REJECTED, "Android refused to erase the phone: " + (e.message?.take(80) ?: "not allowed") + ".", host.now()), deleteCommand = false)
+        } catch (e: Exception) {
+            log("erase failed", e)
+            send(ControlAck(c.id, c.typeCode, ControlResult.FAILED, "The phone could not be erased.", host.now()), deleteCommand = false)
         }
         return true
     }

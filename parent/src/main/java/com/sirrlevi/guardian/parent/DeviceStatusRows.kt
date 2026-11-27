@@ -115,7 +115,7 @@ object ControlLabels {
                 ControlResult.REJECTED -> "Lock refused by the phone"
                 ControlResult.FAILED -> "Lock failed"
                 ControlResult.EXPIRED -> "Lock request expired before the phone saw it"
-                ControlResult.RESTARTING -> "Lock request"
+                ControlResult.RESTARTING, ControlResult.ERASING -> "Lock request"
             }
             ControlType.REBOOT -> when (e.result) {
                 ControlResult.RESTARTING -> "Restart accepted, phone was restarting"
@@ -123,20 +123,28 @@ object ControlLabels {
                 ControlResult.REJECTED -> "Restart refused by the phone"
                 ControlResult.FAILED -> "Restart failed"
                 ControlResult.EXPIRED -> "Restart request expired before the phone saw it"
+                ControlResult.ERASING -> "Restart request"
             }
             ControlType.RING -> when (e.result) {
                 ControlResult.DONE -> "Phone rang (confirmed by the phone)"
                 ControlResult.REJECTED -> "Ring refused by the phone"
                 ControlResult.FAILED -> "Ring failed"
                 ControlResult.EXPIRED -> "Ring request expired before the phone saw it"
-                ControlResult.RESTARTING -> "Ring request"
+                ControlResult.RESTARTING, ControlResult.ERASING -> "Ring request"
             }
             ControlType.LOCATE -> when (e.result) {
                 ControlResult.DONE -> "Position read (confirmed by the phone)"
                 ControlResult.REJECTED -> "Find now refused by the phone"
                 ControlResult.FAILED -> "Find now: no position could be read"
                 ControlResult.EXPIRED -> "Find now expired before the phone saw it"
-                ControlResult.RESTARTING -> "Find now request"
+                ControlResult.RESTARTING, ControlResult.ERASING -> "Find now request"
+            }
+            ControlType.ERASE -> when (e.result) {
+                ControlResult.ERASING -> "Erase accepted, phone was erasing itself (the end result can't be confirmed)"
+                ControlResult.REJECTED -> "Erase refused by the phone"
+                ControlResult.FAILED -> "Erase failed"
+                ControlResult.EXPIRED -> "Erase request expired before the phone saw it"
+                ControlResult.DONE, ControlResult.RESTARTING -> "Erase request"
             }
             null -> "Unsupported request (" + e.typeCode.ifBlank { "unknown" } + ") refused"
         }

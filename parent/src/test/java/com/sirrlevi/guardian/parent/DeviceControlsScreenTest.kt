@@ -1,11 +1,18 @@
 package com.sirrlevi.guardian.parent
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNode
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.dp
+import android.app.KeyguardManager
+import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.sirrlevi.guardian.core.ControlEvent
 import com.sirrlevi.guardian.core.ControlResult
@@ -22,6 +29,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import kotlin.coroutines.EmptyCoroutineContext
 
@@ -46,7 +54,7 @@ class DeviceControlsScreenTest {
         visits = emptyList(), requests = emptyList(), hasMonitor = true
     )
 
-    private fun status(admin: Boolean = true, owner: Boolean = false) = ControlStatus(now - 10_000L, admin, owner, admin, owner, false, true, now - 3_600_000L, false)
+    private fun status(admin: Boolean = true, owner: Boolean = false) = ControlStatus(now - 10_000L, admin, owner, admin, owner, false, true, now - 3_600_000L, false, canErase = owner)
 
     private fun show(
         status: ControlStatus?, log: List<ControlEvent> = emptyList(), error: String? = null, notice: String? = null, problem: Boolean = false,
@@ -180,5 +188,69 @@ class DeviceControlsScreenTest {
         assertFalse(has("Screen locked (confirmed by the phone)"))
         rule.onNodeWithText("Show").performClick()
         assertTrue(has("Screen locked (confirmed by the phone)"))
+    }
+
+    // ---------------------------------------------------------------- erase
+
+    private fun parentPhoneHasScreenLock(secure: Boolean) {
+        val keyguard = ApplicationProvider.getApplicationContext<android.app.Application>().getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+        shadowOf(keyguard).setIsDeviceSecure(secure)
+    }
+
+    @Test fun eraseIsExplainedAsUnavailableWithoutDeviceOwner() {
+        show(status(owner = false))
+        assertTrue(has("Erase phone"))
+        assertTrue(has(ControlTexts.ERASE_NEEDS_OWNER))
+        assertFalse(has("Erase phone…"))
+    }
+
+    @Test fun eraseDialogWarnsItCannotBeUndoneAndSendsNothingByItself() {
+        val fake = FakeControlBackend()
+        parentPhoneHasScreenLock(true)
+        show(status(owner = true), backend = fake)
+        assertTrue(has("Erase phone…"))
+        rule.onNodeWithText("Erase phone…").performClick()
+        assertTrue(has("Erase Aarav's phone?"))
+        assertTrue(has(ControlTexts.ERASE_WARNING))
+        assertTrue(has("can't see the end result", substring = true))
+        rule.onNodeWithText("Continue").assertIsNotEnabled()
+        rule.onNodeWithText("Cancel").performClick()
+        assertFalse(has("Erase Aarav's phone?"))
+        assertTrue(fake.sent.isEmpty())
+    }
+
+    @Test fun continueStaysDisabledUntilTheWordIsTypedExactly() {
+        parentPhoneHasScreenLock(true)
+        show(status(owner = true))
+        rule.onNodeWithText("Erase phone…").performClick()
+        rule.onNode(hasSetTextAction()).performTextInput("erase")
+        rule.onNodeWithText("Continue").assertIsNotEnabled()
+    }
+
+    @Test fun theWordAloneIsEnoughToEnableContinueOnlyWhenThisPhoneHasAScreenLock() {
+        parentPhoneHasScreenLock(true)
+        val fake = FakeControlBackend()
+        show(status(owner = true), backend = fake)
+        rule.onNodeWithText("Erase phone…").performClick()
+        rule.onNode(hasSetTextAction()).performTextInput(ControlTexts.ERASE_WORD)
+        rule.onNodeWithText("Continue").assertIsEnabled()
+        assertTrue("the request is only sent after the screen lock was confirmed", fake.sent.isEmpty())
+    }
+
+    @Test fun withoutAScreenLockOnThisPhoneEraseCannotBeConfirmed() {
+        parentPhoneHasScreenLock(false)
+        val fake = FakeControlBackend()
+        show(status(owner = true), backend = fake)
+        rule.onNodeWithText("Erase phone…").performClick()
+        rule.onNode(hasSetTextAction()).performTextInput(ControlTexts.ERASE_WORD)
+        assertTrue(has("This phone has no screen lock", substring = true))
+        rule.onNodeWithText("Continue").assertIsNotEnabled()
+        assertTrue(fake.sent.isEmpty())
+    }
+
+    @Test fun anAcceptedEraseIsNeverShownAsFinished() {
+        show(status(owner = true), notice = ControlTexts.ERASING + " " + ControlTexts.ERASE_AFTER, problem = false)
+        assertTrue(has("can't see the end result", substring = true))
+        assertFalse(has("Erase finished", substring = true))
     }
 }

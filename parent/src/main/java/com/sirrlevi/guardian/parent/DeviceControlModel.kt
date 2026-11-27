@@ -93,6 +93,7 @@ class DeviceControlModel(
 
     val lockOffer: ControlOffer.Option get() = ControlOffer.lock(status)
     val rebootOffer: ControlOffer.Option get() = ControlOffer.reboot(status)
+    val eraseOffer: ControlOffer.Option get() = ControlOffer.erase(status)
     val ringOffer: ControlOffer.Option get() = ControlOffer.ring(status)
     val locateOffer: ControlOffer.Option get() = locateGate()
     /** True while the phone's own fresh report says it is ringing. */
@@ -148,6 +149,11 @@ class DeviceControlModel(
                 finish("The phone didn't answer, so nothing was done. It may be off, offline or Guardian Child may be stopped there. The request has been cancelled.", problem = true)
             }
             ack == null -> Unit
+            ack.result == ControlResult.ERASING -> {
+                // The phone cannot say it finished: it is resetting. This is the last thing it will ever tell us about this request.
+                finish(ControlTexts.ERASING + " " + ControlTexts.ERASE_AFTER, problem = false)
+                try { b.deleteAck(p.id) } catch (e: CancellationException) { throw e } catch (_: Exception) { }
+            }
             ack.result == ControlResult.RESTARTING -> {
                 restarting = true
                 say("The phone is restarting. " + ControlTexts.AFTER_RESTART_NOTE, problem = false)
@@ -159,6 +165,7 @@ class DeviceControlModel(
                         ControlType.REBOOT -> ControlTexts.BACK
                         ControlType.RING -> ack.reason.ifBlank { RecoveryTexts.RING_STARTED }
                         ControlType.LOCATE -> ack.reason.ifBlank { RecoveryTexts.LOCATED }
+                        ControlType.ERASE -> ack.reason.ifBlank { ControlTexts.ERASING }
                     },
                     problem = false
                 )
@@ -185,6 +192,15 @@ class DeviceControlModel(
     suspend fun ring(): Boolean = send(ControlType.RING)
     suspend fun locate(): Boolean = send(ControlType.LOCATE)
 
+    /** Erase needs the word typed exactly; the screen also asks for this phone's screen lock before calling it. Nothing is sent otherwise. */
+    suspend fun erase(typed: String): Boolean {
+        if (typed != ControlTexts.ERASE_WORD) {
+            say("Nothing was sent: the confirmation word wasn't typed exactly as ${ControlTexts.ERASE_WORD}.", problem = true)
+            return false
+        }
+        return send(ControlType.ERASE)
+    }
+
     private suspend fun send(type: ControlType): Boolean {
         val ok = withContext(io) {
             mutex.withLock {
@@ -194,6 +210,7 @@ class DeviceControlModel(
                     ControlType.REBOOT -> ControlOffer.reboot(status)
                     ControlType.RING -> ControlOffer.ring(status)
                     ControlType.LOCATE -> locateGate()
+                    ControlType.ERASE -> ControlOffer.erase(status)
                 }
                 if (!offer.available) {
                     say(offer.why, problem = true)
@@ -215,6 +232,7 @@ class DeviceControlModel(
                             ControlType.REBOOT -> "Request sent. Waiting for the phone to accept it."
                             ControlType.RING -> "Request sent. This only counts as done once the phone confirms the sound started."
                             ControlType.LOCATE -> "Looking for the phone. This can take up to half a minute."
+                            ControlType.ERASE -> "Erase request sent. The phone has one minute to accept it; if it doesn't answer, nothing is erased and the request is cancelled."
                         },
                         problem = false
                     )
