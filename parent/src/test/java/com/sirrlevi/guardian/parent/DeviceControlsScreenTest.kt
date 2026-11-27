@@ -242,7 +242,7 @@ class DeviceControlsScreenTest {
 
     @Test fun theExactWordEnablesContinueWhenThisPhoneHasAScreenLock() {
         var continued = 0
-        showConfirmation("ERASE", hasLock = true) { continued++ }
+        showConfirmation("ERASE", hasLock = true, onContinue = { continued++ })
         rule.onNodeWithText("Continue").assertIsEnabled()
         assertTrue(has("Next you'll be asked for this phone's screen lock", substring = true))
         assertEquals("nothing happens until Continue is pressed", 0, continued)
@@ -252,7 +252,7 @@ class DeviceControlsScreenTest {
 
     @Test fun withoutAScreenLockOnThisPhoneEraseCannotBeConfirmed() {
         var continued = 0
-        showConfirmation("ERASE", hasLock = false) { continued++ }
+        showConfirmation("ERASE", hasLock = false, onContinue = { continued++ })
         assertTrue(has("This phone has no screen lock", substring = true))
         rule.onNodeWithText("Continue").assertIsNotEnabled()
         assertEquals(0, continued)

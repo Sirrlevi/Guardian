@@ -9,10 +9,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.sirrlevi.guardian.core.AlertKind
-import com.sirrlevi.guardian.core.AlertLevel
+import com.sirrlevi.guardian.core.CommDirection
+import com.sirrlevi.guardian.core.CommRecord
 import com.sirrlevi.guardian.core.FamilyPolicy
-import com.sirrlevi.guardian.core.SafetyAlert
-import com.sirrlevi.guardian.core.SafetyIds
 import com.sirrlevi.guardian.core.SafetyInput
 import com.sirrlevi.guardian.parent.ui.GuardianTheme
 import com.sirrlevi.guardian.parent.ui.SafetyScreen
@@ -51,11 +50,6 @@ class SafetyScreenTest {
         visits = emptyList(), requests = emptyList(), hasMonitor = true
     )
 
-    private val alert = SafetyAlert(
-        SafetyIds.id(AlertKind.MONITORING_OFF, "usage|x"), AlertKind.MONITORING_OFF, AlertLevel.REVIEW, "Usage access is off",
-        "Guardian Child can no longer see which apps are used (as the phone last reported, 2 minutes ago).", now - 120_000L, "Guardian Child"
-    )
-
     private val backend = FakeSafetyBackend(SafetyInput("Aarav's phone", now, utc, reportedAt = now - 60_000L, usageAccess = false, lastSeenMs = now - 60_000L))
 
     /** [check] runs the real model against the fake database first, so dismissing and settings behave as they do in the app. */
@@ -87,13 +81,23 @@ class SafetyScreenTest {
         assertTrue(has(SafetyTexts.LIMITS_TITLE))
     }
 
-    @Test fun anAlertShowsItsNeutralLabelTitleReasonAndSource() {
+    @Test fun anAlertShowsItsNeutralLabelTitleAndReason() {
         show()
         assertTrue(has("Review recommended"))
         assertTrue(has("Usage access is off"))
         assertTrue(has("as the phone last reported", substring = true))
-        assertTrue(has("From: Guardian Child"))
         assertTrue(has("Dismiss"))
+    }
+
+    @Test fun aMessageAlertNamesTheAppAndTheMatchedWordingButNeverClaimsMoreThanThat() {
+        val message = CommRecord("m1", "com.whatsapp", "WhatsApp", "Sam", null, false, "this is our little secret", now - 3_600_000L, "msg", CommDirection.INCOMING, true)
+        backend.inputNow = SafetyInput("Aarav's phone", now, utc, comms = listOf(message), reportedAt = now - 60_000L, usageAccess = true, lastSeenMs = now - 60_000L)
+        show()
+        assertTrue(has("Potentially suspicious content"))
+        assertTrue(has("Potentially suspicious wording from Sam"))
+        assertTrue(has("\"our little secret\"", substring = true))
+        assertTrue(has("words alone prove nothing", substring = true))
+        assertTrue(has("From: WhatsApp"))
     }
 
     @Test fun whileLoadingItSaysItIsChecking() {
