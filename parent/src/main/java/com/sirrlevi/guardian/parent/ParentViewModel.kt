@@ -100,6 +100,11 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     @androidx.annotation.VisibleForTesting
     internal var recoveryBackendForTest: RecoveryBackend? = null
 
+    /** Device appearance: the wallpaper picture the child chose to share. Polls only while its screen is open. */
+    val appearance = AppearanceModel(backend = { appearanceBackendForTest ?: RepoAppearanceBackend(repo, { session }, { session = it }, { device?.id }) })
+    @androidx.annotation.VisibleForTesting
+    internal var appearanceBackendForTest: AppearanceBackend? = null
+
     /** Lock now, restart, ring, find now and the phone's real status. Polls only while its screen is open. */
     val controls = DeviceControlModel(
         backend = { controlBackendForTest ?: RepoControlBackend(repo, { session }, { session = it }, { device?.id }) },
@@ -235,6 +240,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         preview.reset()
         controls.reset()
         recovery.reset()
+        appearance.reset()
         repo.clearSession()
         session = null
         devices = emptyList()
@@ -256,6 +262,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         preview.reset()
         controls.reset()
         recovery.reset()
+        appearance.reset()
         stopRealtime()
         startRealtime()
         refreshAll(silent = false)
@@ -595,6 +602,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         preview.foreground = true
         controls.foreground = true
         recovery.foreground = true
+        appearance.foreground = true
         if (session == null) return
         startRealtime()
         pollJob?.cancel()
@@ -611,6 +619,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         preview.foreground = false
         controls.foreground = false
         recovery.foreground = false
+        appearance.foreground = false
         pollJob?.cancel()
         stopRealtime()
     }

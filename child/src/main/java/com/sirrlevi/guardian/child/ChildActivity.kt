@@ -67,6 +67,10 @@ class ChildActivity : ComponentActivity() {
     private val backgroundLocationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { vm.refreshLocal() }
 
+    // The system picture picker needs no permission: Guardian only receives the one picture the child chooses.
+    private val wallpaperPicker =
+        registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) vm.shareWallpaper(uri) }
+
     private val vpnConsent =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) startVpnService()
@@ -111,7 +115,8 @@ class ChildActivity : ComponentActivity() {
             install = { file -> install(file) },
             startCapture = { requestCapture() },
             declineCapture = { CaptureRuntime.declined(this) },
-            stopCapture = { CaptureRuntime.stopByChild(this) }
+            stopCapture = { CaptureRuntime.stopByChild(this) },
+            pickWallpaper = { wallpaperPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
         )
         setContent {
             val dark = isSystemInDarkTheme()

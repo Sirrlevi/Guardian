@@ -32,6 +32,8 @@ import com.sirrlevi.guardian.core.RecoverySettings
 import com.sirrlevi.guardian.core.RecoverySettingsCodec
 import com.sirrlevi.guardian.core.RecoveryState
 import com.sirrlevi.guardian.core.RecoveryStateCodec
+import com.sirrlevi.guardian.core.WallpaperCodec
+import com.sirrlevi.guardian.core.WallpaperMeta
 import com.sirrlevi.guardian.core.ControlStatusCodec
 import com.sirrlevi.guardian.core.CaptureStateCodec
 import com.sirrlevi.guardian.core.LiveCodec
@@ -241,6 +243,21 @@ class ParentRepository(context: Context) {
     fun clearRecoveryHistory(session: GuardianSession, deviceId: String) {
         api.delete(GuardianPaths.recoveryHistory(session.uid, deviceId), session)
         api.delete(GuardianPaths.recoveryLast(session.uid, deviceId), session)
+    }
+
+    // ------------------------------------------------------------ device appearance (the wallpaper the child shared)
+
+    fun fetchWallpaperMeta(session: GuardianSession, deviceId: String): WallpaperMeta? =
+        WallpaperCodec.fromJson(api.get(GuardianPaths.wallpaper(session.uid, deviceId), session).obj())
+
+    /** The shared picture as JPEG bytes, or null when any piece is missing or damaged (never a half picture). */
+    fun fetchWallpaperImage(session: GuardianSession, deviceId: String, meta: WallpaperMeta): ByteArray? =
+        decodePieces(api.get(GuardianPaths.wallpaperBlob(session.uid, deviceId), session).obj(), meta.chunks)
+
+    /** Description first, so nobody sees a description whose picture is already gone. */
+    fun deleteWallpaper(session: GuardianSession, deviceId: String) {
+        api.delete(GuardianPaths.wallpaper(session.uid, deviceId), session)
+        api.delete(GuardianPaths.wallpaperBlob(session.uid, deviceId), session)
     }
 
     class DeviceMeta(val id: String, val name: String, val manufacturer: String, val lastSeen: Long)

@@ -59,7 +59,9 @@ class ChildActions(
     /** The child tapped Allow on a screen-sharing request: open Android's own screen-capture dialog. */
     val startCapture: () -> Unit = {},
     val declineCapture: () -> Unit = {},
-    val stopCapture: () -> Unit = {}
+    val stopCapture: () -> Unit = {},
+    /** Opens Android's own picture picker so the child can choose the picture to share as their wallpaper. */
+    val pickWallpaper: () -> Unit = {}
 )
 
 @Composable

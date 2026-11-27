@@ -403,6 +403,32 @@ fun ProtectionScreen(vm: ChildViewModel, padding: PaddingValues, actions: ChildA
                 Text(com.sirrlevi.guardian.core.RecoveryChildText.WHAT_PARENT_CAN_DO, style = MaterialTheme.typography.bodySmall, color = kc.muted)
             }
         }
+        item {
+            KCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    KEmoji("🎨", bg = kc.purple.copy(alpha = 0.16f))
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Share my wallpaper", style = MaterialTheme.typography.titleSmall, color = kc.text)
+                        Text(
+                            com.sirrlevi.guardian.core.WallpaperChildText.status(vm.wallpaperSharedAt.takeIf { it > 0L }?.let { dateTime(it) }),
+                            style = MaterialTheme.typography.bodySmall, color = kc.muted
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(com.sirrlevi.guardian.core.WallpaperChildText.EXPLAIN, style = MaterialTheme.typography.bodySmall, color = kc.muted)
+                Spacer(Modifier.height(12.dp))
+                KButton(
+                    if (vm.wallpaperBusy) "Working…" else if (vm.wallpaperSharedAt > 0L) "Choose a different picture" else "Choose a picture to share",
+                    { actions.pickWallpaper() }, Modifier.fillMaxWidth(), enabled = !vm.wallpaperBusy, soft = true, color = kc.purple
+                )
+                if (vm.wallpaperSharedAt > 0L) {
+                    Spacer(Modifier.height(8.dp))
+                    KButton("Remove what I shared", { vm.removeWallpaper() }, Modifier.fillMaxWidth(), enabled = !vm.wallpaperBusy, soft = true, color = kc.muted)
+                }
+            }
+        }
         vm.mediaStatus?.let { m ->
             item {
                 KCard {

@@ -54,6 +54,9 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
     var monitorRunning by mutableStateOf(false); private set
     /** What Find my phone is doing on this phone, so the child can always see it. */
     var recovery by mutableStateOf(com.sirrlevi.guardian.core.RecoveryLocalView(null, com.sirrlevi.guardian.core.LocationPermission.NONE, true)); private set
+    /** When the child last shared a wallpaper picture from this phone (0 = nothing shared), and whether a send or removal is running. */
+    var wallpaperSharedAt by mutableLongStateOf(0L); private set
+    var wallpaperBusy by mutableStateOf(false); private set
     var canEnforce by mutableStateOf(false); private set
     var isDeviceOwner by mutableStateOf(false); private set
     var lastSync by mutableLongStateOf(0L); private set
@@ -212,6 +215,40 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
         work.enqueue(OneTimeWorkRequestBuilder<ChildSyncWorker>().setConstraints(constraints).build())
     }
 
+    /** The child picked a picture to share as their wallpaper. Nothing is sent unless this is called with that picture. */
+    fun shareWallpaper(uri: android.net.Uri) {
+        if (wallpaperBusy) return
+        wallpaperBusy = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val outcome = WallpaperSharing.share(app, uri)
+            withContext(Dispatchers.Main) {
+                wallpaperBusy = false
+                message = when (outcome) {
+                    is WallpaperSharing.Outcome.Shared -> com.sirrlevi.guardian.core.WallpaperChildText.SHARED
+                    WallpaperSharing.Outcome.CantOpen -> com.sirrlevi.guardian.core.WallpaperChildText.CANT_OPEN
+                    WallpaperSharing.Outcome.TooBig -> com.sirrlevi.guardian.core.WallpaperChildText.TOO_BIG
+                    WallpaperSharing.Outcome.UploadFailed -> com.sirrlevi.guardian.core.WallpaperChildText.UPLOAD_FAILED
+                    WallpaperSharing.Outcome.NotSignedIn -> com.sirrlevi.guardian.core.WallpaperChildText.NOT_SIGNED_IN
+                }
+                refreshLocal()
+            }
+        }
+    }
+
+    /** Takes the shared wallpaper off the server again. */
+    fun removeWallpaper() {
+        if (wallpaperBusy) return
+        wallpaperBusy = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = WallpaperSharing.remove(app)
+            withContext(Dispatchers.Main) {
+                wallpaperBusy = false
+                message = if (ok) com.sirrlevi.guardian.core.WallpaperChildText.REMOVED else com.sirrlevi.guardian.core.WallpaperChildText.REMOVE_FAILED
+                refreshLocal()
+            }
+        }
+    }
+
     fun syncNow() {
         WorkManager.getInstance(app).enqueue(OneTimeWorkRequestBuilder<ChildSyncWorker>().build())
         message = "Sync requested. It runs in a moment."
@@ -224,6 +261,7 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
         mediaStatus = MediaBackupState(app).localStatus(app)
         val location = AndroidLocationSource(app)
         recovery = com.sirrlevi.guardian.core.RecoveryLocalView(ControlRuntime.recoverySettings(), location.permission(), location.servicesOn())
+        wallpaperSharedAt = WallpaperSharing.sharedAt(app)
         monitorRunning = GuardianMonitorService.running
         canEnforce = ChildPermissions.canEnforce(app)
         isDeviceOwner = ChildPermissions.isDeviceOwner(app)

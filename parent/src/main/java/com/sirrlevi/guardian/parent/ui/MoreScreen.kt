@@ -30,7 +30,8 @@ fun MoreScreen(vm: ParentViewModel, padding: PaddingValues, open: (Tab) -> Unit)
     val sections = listOf(
         MoreSection("Your child's phone", listOf(
             MoreItem(Tab.Recovery, GIcon.Pin, "Find my phone", "See where the phone was last, make it ring, or lock it. Location is off until you turn it on and your child allows it."),
-            MoreItem(Tab.Controls, GIcon.Lock, "Device controls", "Lock the screen, restart when Android allows it, and see the phone's real status.")
+            MoreItem(Tab.Controls, GIcon.Lock, "Device controls", "Lock the screen, restart when Android allows it, and see the phone's real status."),
+            MoreItem(Tab.Appearance, GIcon.Photo, "Device appearance", "See the wallpaper your child chose to share. Android doesn't let apps read it, so they have to send it.")
         )),
         MoreSection("Insights", listOf(
             MoreItem(Tab.Reports, GIcon.Chart, "Reports", "Weekly and monthly screen time, trends and top apps.")

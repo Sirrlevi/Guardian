@@ -60,6 +60,12 @@ object GuardianPaths {
     /** The phone's short history of requests it handled. */
     fun controlLog(familyId: String, deviceId: String) = control(familyId, deviceId) + "/log"
 
+    // ---- device appearance (the wallpaper the child chose to share)
+    fun appearance(familyId: String, deviceId: String) = device(familyId, deviceId) + "/appearance"
+    /** Written by the child: when and how big the shared wallpaper picture is. Written after the picture, so it is always complete. */
+    fun wallpaper(familyId: String, deviceId: String) = appearance(familyId, deviceId) + "/wallpaper"
+    fun wallpaperBlob(familyId: String, deviceId: String) = appearance(familyId, deviceId) + "/wallpaperblob"
+
     // ---- device recovery (location, ring)
     fun recovery(familyId: String, deviceId: String) = device(familyId, deviceId) + "/recovery"
     /** Written by the parent: whether location is shared, how often, and how long history is kept. */
