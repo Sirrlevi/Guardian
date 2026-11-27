@@ -31,6 +31,8 @@ android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
         unitTests.all { test ->
+            // Robolectric keeps a simulated Android per test class in memory; the default 512 MB test heap ran out once the UI tests grew.
+            test.maxHeapSize = "2g"
             test.testLogging {
                 events("failed")
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
