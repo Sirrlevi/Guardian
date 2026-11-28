@@ -51,7 +51,7 @@ families/<fid>/
     requests/<ts>              browserHistory   usage/*  apps/installed  recentActivities
 ```
 
-Rules (`firebase/database.rules.json`): everything denied by default; a family node is readable by the parent or its members; each `devices/<deviceId>` subtree is readable and writable by the parent **or the device itself**. There are no finer per-path rules yet (a paired child account could write any path under its own device node, and the parent could write any path there too).
+Rules (`firebase/database.rules.json`): everything denied by default. This section described the original coarse rules (a phone could write any path under its own device node); they were replaced in Phase 11 by per-path rules, see `docs/SECURITY_AND_LIMITATIONS.md` → "What the database rules enforce".
 
 ## 5. Services, workers, receivers
 

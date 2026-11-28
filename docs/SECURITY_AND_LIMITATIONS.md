@@ -9,9 +9,25 @@
 5. Add GitHub repository Actions secrets FIREBASE_API_KEY and FIREBASE_DATABASE_URL.
 6. Re-run the Android workflow so the Firebase settings are compiled into both APKs.
 
-Each Parent and Child installation uses its own Firebase email/password account. The parent creates a time-limited pairing code; the child signs in with a separate child account and enters that code. The rules permit the paired child account to write its own device record; the parent account owns family policy.
+Each Parent and Child installation uses its own Firebase email/password account. The parent creates a time-limited pairing code; the child signs in with a separate child account and enters that code. The parent account owns the family record.
 
 Firebase API keys identify the project; they are not a substitute for database rules. Never remove the supplied rules or make the database globally readable/writable.
+
+### What the database rules enforce
+
+`firebase/database.rules.json` follows least privilege. Everything is denied unless a rule grants it:
+
+- **Parent** (uid = family id): reads and writes its own family, nothing else.
+- **Paired phone**: writes only the paths the Child app really writes (usage, info, sessions, communication previews, media upload, capture and control answers, wallpaper, recovery points, its own registration fields) and reads only its own data and the family policy. It may *clear* a command it has handled but never create or change one, so a command cannot be forged into its own inbox. A request for more time must stay "pending" when the phone writes it; only the parent can approve or deny it.
+- **Parent-only data**: Safety alerts (settings, dismissals, events, permission snapshots), media and recovery settings, "deleted media" markers, the policy and the command inbox. A phone can neither read nor change its own Safety data.
+- **Other phones and other families**: a phone cannot read or write another phone's data, the family record or the member list. A removed member (member record deleted by the parent) loses all access at once.
+- **Joining a family**: the member record must carry the invitation code the parent created, and that code must belong to that family and still be valid. Invitations can only be created, replaced or withdrawn by their owner, last at most one hour (the app uses 15 minutes) and cannot be listed.
+
+`DatabaseRulesTest` runs the real rules file through a small evaluator for these cases. It is not Firebase itself, so after publishing the rules, try a few requests in the Firebase console Rules Playground once.
+
+Compatibility: the rules need the current Child app (it sends the invitation code with its member record and registers itself with a patch). A phone paired earlier keeps working. Pairing with an older Child app fails until it is updated. Publishing the rules is a manual step (Realtime Database → Rules); CI does not deploy them.
+
+Residual risks: the 8-digit invitation code can be guessed in theory by a signed-in user for as long as it lives; Firebase rules cannot rate-limit. A compromised child phone can still send false data about itself, because nothing can prove its data is honest.
 
 ## Android enrollment and permissions
 
@@ -61,6 +77,24 @@ Keep a secure backup of the keystore and passwords. Never rotate the signing key
 - The first installation must come from the persistent-key signed release. Previously installed debug APKs signed by a different runner key must be uninstalled first; do this before account creation/pairing because uninstalling clears local data.
 - A normal in-place update preserves app-private SharedPreferences and Android Keystore-backed session/token data. Uninstalling the app or clearing its storage does not.
 - Background update checks are best-effort, not instant push delivery. Android can delay periodic work because of battery and network policies. Manual Check for updates is available at any time.
+
+## Telegram reports (optional)
+
+Off until the parent saves a bot token and chat, tests the connection and switches reports on (Parent app → More → Telegram reports).
+
+- Guardian has no server, so the **Parent app sends the reports itself, only while it is open**. Reports that could not be sent wait and go out the next time the app is open. Nothing is sent in the background.
+- The bot token and chat ID are stored encrypted with an AES-GCM key held in the Android Keystore of the parent's phone. They are not in the source, the APK, GitHub, logs or plain files, and the token is never shown again after saving. Signing out removes them.
+- What the Keystore does **not** protect against: someone who unlocks the parent's phone and uses Guardian, a rooted phone, and Telegram itself (bot chats are not end-to-end encrypted). Use a bot only you control and a chat only you can read.
+- Requests go only to `api.telegram.org` over HTTPS (other hosts, ports and redirects are refused). Messages are plain text.
+- A report counts as **sent** only when Telegram answers with a message id. Anything else is shown as waiting, will try again, not sent, or **not confirmed** (the connection broke after sending, or the app stopped mid-send). Not-confirmed reports are never re-sent automatically, so they cannot be duplicated; the parent may choose to send them again.
+- Each report has a unique key, so the same alert is never queued twice. Sending is rate-limited (at most 10 per pass, 1.5 s apart, 15 per minute), failed sends back off (1, 5, 15, 60, 360 min, 6 tries), and Telegram's "slow down" is obeyed. History is kept for 1, 7, 30 or 90 days (default 30).
+- Only what happens after reports are switched on is sent. Switching off discards what was waiting; clearing history is never followed by a re-send of what was cleared.
+- What is sent: the Safety alerts you see (label, title, reason; these can name an app, a sender, a link or a flagged word), phone status changes, and an optional daily screen-time total. Never the full text of messages, photos, videos, screenshots or Shared media. Automatic media backup to Telegram is deliberately not offered.
+- Reports and their delivery state are kept in the Parent app's private no-backup storage until their retention ends.
+
+## Safety alerts
+
+Alerts come from simple rules over message previews, app use and the phone's own reports. They never claim certainty, always state their reason, and the parent can dismiss or restore them. They can be wrong in both directions and are not evidence of anything. They are only evaluated while the Parent app is open.
 
 ## Transparency
 

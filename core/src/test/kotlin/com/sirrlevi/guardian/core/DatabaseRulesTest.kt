@@ -29,13 +29,13 @@ class DatabaseRulesTest {
     private fun path(s: String) = s.split("/").filter { it.isNotEmpty() }
 
     /** The database as it is when both phones are paired and the parent has already set things up. */
-    private fun db(extra: Map<String, Any?> = emptyMap()): Map<String, Any?> {
+    private fun db(extra: Map<String, Any?> = emptyMap(), members: List<String> = listOf(kid, sibling)): Map<String, Any?> {
         val base = mapOf(
             "pairingCodes" to mapOf("12345678" to mapOf("familyId" to family, "expiresAt" to now + 600_000L)),
             "families" to mapOf(
                 family to mapOf(
                     "policies" to mapOf("x" to 1L),
-                    "members" to mapOf(kid to mapOf("role" to "child"), sibling to mapOf("role" to "child")),
+                    "members" to members.associateWith { mapOf("role" to "child") },
                     "devices" to mapOf(
                         kid to mapOf(
                             "safety" to mapOf("settings" to mapOf("on" to true)),
@@ -200,15 +200,12 @@ class DatabaseRulesTest {
     }
 
     @Test fun aRemovedPhoneLosesEverything() {
-        val gone = db().toMutableMap()
-        val families = (gone["families"] as Map<*, *>)[family] as Map<*, *>
-        val members = (families["members"] as Map<*, *>).filterKeys { it != kid }
-        @Suppress("UNCHECKED_CAST")
-        gone["families"] = mapOf(family to ((families as Map<String, Any?>) + ("members" to members)))
+        val gone = db(members = listOf(sibling))
         assertFalse(write(kid, GuardianPaths.daily(family, kid) + "/$dayKey", mapOf("x" to 1L), gone))
         assertFalse(read(kid, GuardianPaths.policy(family), gone))
         assertFalse(read(kid, GuardianPaths.captureInbox(family, kid), gone))
         assertTrue("the parent still has its data", read(family, GuardianPaths.daily(family, kid), gone))
+        assertTrue("a phone that is still paired is unaffected", write(sibling, GuardianPaths.daily(family, sibling) + "/$dayKey", mapOf("x" to 1L), gone))
     }
 
     // ---------------------------------------------------------------- pairing
@@ -227,11 +224,7 @@ class DatabaseRulesTest {
     }
 
     @Test fun afterJoiningAPhoneCanRegisterItselfFieldByFieldButNotReplaceItsRecord() {
-        val joined = db().toMutableMap()
-        @Suppress("UNCHECKED_CAST")
-        val fam = (joined["families"] as Map<String, Any?>)[family] as Map<String, Any?>
-        @Suppress("UNCHECKED_CAST")
-        joined["families"] = mapOf(family to (fam + ("members" to ((fam["members"] as Map<String, Any?>) + ("C3" to mapOf("role" to "child", "code" to "12345678"))))))
+        val joined = db(members = listOf(kid, sibling, "C3"))
         for (field in listOf("deviceName", "manufacturer", "androidVersion", "joinedAt", "lastSeen", "monitoringDisclosure"))
             assertTrue(field, write("C3", "families/$family/devices/C3/$field", "x", joined))
         assertFalse(write("C3", "families/$family/devices/C3", mapOf("deviceName" to "x"), joined))
