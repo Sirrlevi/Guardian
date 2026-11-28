@@ -137,7 +137,9 @@ data class SafetyInput(
     val notificationAccess: Boolean? = null,
     val serviceRunning: Boolean? = null,
     /** Permission name to granted, as last reported. */
-    val perms: Map<String, Boolean> = emptyMap()
+    val perms: Map<String, Boolean> = emptyMap(),
+    /** Which phone this is about; used to keep the same alert on two phones apart in reports. */
+    val deviceId: String = ""
 )
 
 object SafetyIds {
