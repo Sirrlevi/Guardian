@@ -135,12 +135,15 @@ class ChildViewModel(application: Application) : AndroidViewModel(application) {
                     throw IllegalStateException("That pairing code has expired. Ask your parent for a new one.")
                 }
                 val now = System.currentTimeMillis()
+                // The code goes along so the database can check this phone really holds a current invitation for this family.
                 api.put("families/$family/members/${auth.uid}", JsonObject().apply {
                     addProperty("joinedAt", now)
                     addProperty("role", "child")
                     addProperty("deviceName", Build.MODEL ?: "Android device")
+                    addProperty("code", digits)
                 }, auth)
-                api.put("families/$family/devices/${auth.uid}", JsonObject().apply {
+                // A patch, not a put: it only sets these fields, so pairing again never wipes what the parent set for this phone.
+                api.patch("families/$family/devices/${auth.uid}", JsonObject().apply {
                     addProperty("deviceName", Build.MODEL ?: "Android device")
                     addProperty("manufacturer", Build.MANUFACTURER ?: "Android")
                     addProperty("androidVersion", Build.VERSION.RELEASE ?: "unknown")

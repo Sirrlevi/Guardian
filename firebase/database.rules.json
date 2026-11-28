@@ -5,23 +5,193 @@
     "pairingCodes": {
       "$code": {
         ".read": "auth != null && data.child('expiresAt').val() > now",
-        ".write": "auth != null && newData.child('familyId').val() == auth.uid"
+        ".write": "auth != null && (!data.exists() || data.child('familyId').val() == auth.uid || data.child('expiresAt').val() < now) && (!newData.exists() || (newData.child('familyId').val() == auth.uid && newData.child('expiresAt').val() <= now + 3600000))"
       }
     },
     "families": {
       "$familyId": {
-        ".read": "auth != null && (auth.uid == $familyId || data.child('members').child(auth.uid).exists())",
+        ".read": "auth != null && auth.uid == $familyId",
         ".write": "auth != null && auth.uid == $familyId",
+        "policies": {
+          ".read": "auth != null && (auth.uid == $familyId || root.child('families').child($familyId).child('members').child(auth.uid).exists())"
+        },
         "members": {
           "$memberId": {
             ".read": "auth != null && (auth.uid == $familyId || auth.uid == $memberId)",
-            ".write": "auth != null && auth.uid == $memberId"
+            ".write": "auth != null && auth.uid == $memberId && (data.exists() || (newData.child('code').exists() && root.child('pairingCodes').child(newData.child('code').val()).child('familyId').val() == $familyId && root.child('pairingCodes').child(newData.child('code').val()).child('expiresAt').val() > now))"
           }
         },
         "devices": {
           "$deviceId": {
-            ".read": "auth != null && (auth.uid == $familyId || auth.uid == $deviceId)",
-            ".write": "auth != null && (auth.uid == $familyId || auth.uid == $deviceId)"
+            "deviceName": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "manufacturer": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "androidVersion": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "joinedAt": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "lastSeen": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "monitoringDisclosure": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "status": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "usage": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "recentActivities": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "apps": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "rt": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "info": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "catalog": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "icons": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "sessions": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "screen": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "daily": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "hourly": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "comms": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "browserHistory": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "requests": {
+              "$requestId": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists() && (!data.exists() || (data.child('status').val() == 'pending' && newData.child('status').val() == 'pending'))"
+              }
+            },
+            "settings": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+            },
+            "media": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              "status": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "items": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "blobs": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              }
+            },
+            "capture": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              "state": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "acks": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "shots": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "shotblobs": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "live": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "liveblob": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "log": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "inbox": {
+                "cmd": {
+                  "$commandId": {
+                    ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists() && !newData.exists()"
+                  }
+                }
+              }
+            },
+            "control": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              "status": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "acks": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "log": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "inbox": {
+                "$commandId": {
+                  ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists() && !newData.exists()"
+                }
+              }
+            },
+            "appearance": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              "wallpaper": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "wallpaperblob": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              }
+            },
+            "recovery": {
+              ".read": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()",
+              "state": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "last": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              },
+              "history": {
+                ".write": "auth != null && auth.uid == $deviceId && root.child('families').child($familyId).child('members').child(auth.uid).exists()"
+              }
+            }
           }
         }
       }

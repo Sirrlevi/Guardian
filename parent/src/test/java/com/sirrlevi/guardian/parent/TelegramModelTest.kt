@@ -375,7 +375,7 @@ class TelegramModelTest {
     @Test fun aReportLeftSendingByAStopComesBackAsNotConfirmed() = runBlocking {
         ready()
         // Through the same JSON the phone's storage uses: a report saved as "sending" is read back as "not confirmed".
-        backend.outboxNow = DeliveryCodec.listFromJson(DeliveryCodec.listToJson(listOf(item("x", DeliveryState.SENDING))))
+        backend.outboxNow = DeliveryCodec.listFromJson(DeliveryCodec.listToJson(listOf(item("sending1", DeliveryState.SENDING))))
         model.load()
         assertEquals(DeliveryState.UNCONFIRMED, model.items.single().state)
         model.deliverDue()
