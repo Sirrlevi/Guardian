@@ -119,7 +119,7 @@ data class ChildDevice(
  */
 enum class Tab(val label: String, val inBar: Boolean = true) {
     Home("Home"), Apps("Apps"), Activity("Activity"), Messages("Messages"), More("More"),
-    Reports("Reports", false), Settings("Settings", false), Media("Shared media", false), Preview("Screen preview", false), Controls("Device controls", false), Recovery("Find my phone", false), Appearance("Device appearance", false), Safety("Safety alerts", false)
+    Reports("Reports", false), Settings("Settings", false), Media("Shared media", false), Preview("Screen preview", false), Controls("Device controls", false), Recovery("Find my phone", false), Appearance("Device appearance", false), Safety("Safety alerts", false), Telegram("Telegram reports", false)
 }
 
 enum class ThemeMode { System, Dark, Light }

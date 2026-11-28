@@ -77,7 +77,7 @@ class SafetyScreenTest {
     @Test fun theScreenSaysTheParentDecidesAndNothingIsBlockedOrSent() {
         show()
         assertTrue(has(SafetyTexts.INTRO_TITLE))
-        assertTrue(has("Nothing is blocked or sent to anyone", substring = true))
+        assertTrue(has("Nothing is blocked, and nothing leaves the app unless you turn on Telegram reports", substring = true))
         assertTrue(has(SafetyTexts.LIMITS_TITLE))
     }
 

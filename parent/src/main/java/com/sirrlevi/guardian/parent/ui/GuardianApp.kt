@@ -56,6 +56,7 @@ private fun Tab.icon(): GIcon = when (this) {
     Tab.Recovery -> GIcon.Pin
     Tab.Appearance -> GIcon.Photo
     Tab.Safety -> GIcon.Shield
+    Tab.Telegram -> GIcon.Bell
 }
 
 /**
@@ -150,6 +151,7 @@ private fun MainShell(vm: ParentViewModel, requestedTab: Tab?, onRequestedTabCon
                 Tab.Recovery -> RecoveryScreen(vm, padding)
                 Tab.Appearance -> AppearanceScreen(vm, padding)
                 Tab.Safety -> SafetyScreen(vm, padding)
+                Tab.Telegram -> TelegramScreen(vm, padding)
             }
         }
     }

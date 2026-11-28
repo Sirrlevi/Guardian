@@ -43,7 +43,12 @@ fun MoreScreen(vm: ParentViewModel, padding: PaddingValues, open: (Tab) -> Unit)
         )),
         MoreSection("Optional tools", listOf(
             MoreItem(Tab.Media, GIcon.Photo, "Shared media", "Optional preview copies of new photos and videos. Off until you turn it on."),
-            MoreItem(Tab.Preview, GIcon.Screen, "Screen preview", "Ask to see your child's screen. It only starts if they allow it on their phone, every time.")
+            MoreItem(Tab.Preview, GIcon.Screen, "Screen preview", "Ask to see your child's screen. It only starts if they allow it on their phone, every time."),
+            MoreItem(
+                Tab.Telegram, GIcon.Bell, "Telegram reports",
+                (if (vm.telegram.settings.enabled) "On. " else "") +
+                    "Optional copies of Safety alerts, phone status and a daily total to your own Telegram chat. Off until you set it up."
+            )
         )),
         MoreSection("Guardian", listOf(
             MoreItem(Tab.Settings, GIcon.Settings, "Settings", "Pair a phone, app updates, theme and account.")

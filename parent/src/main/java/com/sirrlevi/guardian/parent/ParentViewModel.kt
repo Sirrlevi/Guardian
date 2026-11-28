@@ -110,6 +110,18 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
     @androidx.annotation.VisibleForTesting
     internal var safetyBackendForTest: SafetyBackend? = null
 
+    /**
+     * Optional Telegram reports. There is no Guardian server, so they are sent from here, only while the app is open; what could not be sent waits.
+     * Each finished Safety check hands its alerts over, and the 30 s foreground loop sends whatever is due.
+     */
+    val telegram = TelegramModel(backend = { telegramBackendForTest ?: DeviceTelegramBackend(app) })
+    @androidx.annotation.VisibleForTesting
+    internal var telegramBackendForTest: TelegramBackend? = null
+
+    init {
+        safety.onChecked = { checked -> viewModelScope.launch { telegram.report(checked) } }
+    }
+
     /** Lock now, restart, ring, find now and the phone's real status. Polls only while its screen is open. */
     val controls = DeviceControlModel(
         backend = { controlBackendForTest ?: RepoControlBackend(repo, { session }, { session = it }, { device?.id }) },
@@ -247,6 +259,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
         recovery.reset()
         appearance.reset()
         safety.reset()
+        viewModelScope.launch { telegram.wipe() }
         repo.clearSession()
         session = null
         devices = emptyList()
@@ -619,6 +632,7 @@ class ParentViewModel(application: Application) : AndroidViewModel(application) 
                 delay(30_000L)
                 refreshAll(silent = true)
                 if (session != null && device != null) safety.checkIfDue()
+                if (session != null) telegram.deliverDue()
             }
         }
         refreshAll(silent = true)

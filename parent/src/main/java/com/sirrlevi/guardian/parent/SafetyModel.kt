@@ -70,7 +70,8 @@ object SafetyInputs {
             usageAccess = info?.permUsage,
             notificationAccess = info?.takeIf { it.notifAccessKnown }?.permNotifAccess,
             serviceRunning = info?.takeIf { it.monitorKnown }?.monitorRunning,
-            perms = perms(info)
+            perms = perms(info),
+            deviceId = device.id
         )
     }
 }
@@ -146,6 +147,12 @@ class SafetyModel(
 
     @Volatile var foreground = true
 
+    /** Called after each successful check with what was found, so other features (Telegram reports) can pass it on. Never blocks the check. */
+    @Volatile var onChecked: ((Checked) -> Unit)? = null
+
+    /** The result of a check: the alerts the parent has not dismissed, and the daily totals the check looked at. */
+    data class Checked(val deviceId: String, val deviceName: String, val now: Long, val alerts: List<SafetyAlert>, val days: List<SafetyDay>)
+
     private val mutex = Mutex()
     private var lastInput: SafetyInput? = null
     private var lastEvents: List<SafetyAlert> = emptyList()
@@ -194,6 +201,13 @@ class SafetyModel(
             settings = cfg
             recompute()
             phase = Phase.READY; error = null; checkedAt = clock()
+            try {
+                onChecked?.invoke(Checked(input.deviceId, input.deviceName, input.now, active, input.days))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // A listener's problem is never the check's problem.
+            }
             REFRESH_MS
         } catch (e: CancellationException) {
             throw e

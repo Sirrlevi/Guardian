@@ -40,7 +40,7 @@ import java.util.Locale
 object SafetyTexts {
     const val INTRO_TITLE = "You review these, Guardian doesn't decide"
     const val INTRO = "These alerts come from simple rules over message previews, app use and the phone's own reports. " +
-        "A rule can only notice a pattern or a word; it can't tell who someone is or what they meant. Nothing is blocked or sent to anyone."
+        "A rule can only notice a pattern or a word; it can't tell who someone is or what they meant. Nothing is blocked, and nothing leaves the app unless you turn on Telegram reports."
     const val NOTHING = "No alerts from the rules right now"
     const val NOTHING_BODY = "That doesn't mean everything is fine: previews are partial and many things can't be seen. It only means none of the rules below found anything."
     const val LOADING = "Checking…"
