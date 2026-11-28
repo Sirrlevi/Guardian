@@ -127,7 +127,7 @@ class TelegramTransportException(val sent: Boolean, message: String) : IOExcepti
 
 data class TransportResponse(val code: Int, val body: String?)
 
-interface TelegramTransport {
+fun interface TelegramTransport {
     fun post(url: String, form: String): TransportResponse
 }
 
