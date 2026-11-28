@@ -102,7 +102,8 @@ class DatabaseRulesTest {
             d("status"), d("usage/today"), d("usage/week"), d("recentActivities"), d("apps/installed"), d("browserHistory/-Nabc"),
             d("deviceName"), d("manufacturer"), d("androidVersion"), d("joinedAt"), d("lastSeen"), d("monitoringDisclosure"), d("requests/1700000000000")
         )
-        for (p in paths) assertTrue("the phone must be able to write $p", write(kid, p))
+        // A request is always sent as pending, like the app does; everything else accepts any content.
+        for (p in paths) assertTrue("the phone must be able to write $p", write(kid, p, mapOf("x" to 1L, "status" to "pending")))
     }
 
     @Test fun aPairedPhoneCanReadItsOwnDataAndTheFamilyPolicyOnly() {
